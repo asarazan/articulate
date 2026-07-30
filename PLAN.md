@@ -389,14 +389,22 @@ Generating a Gradle wrapper requires an existing Gradle — chicken-and-egg. Thi
    ```
 3. Thereafter `./gradlew` only; the system Gradle is never needed again and may be uninstalled.
 
-### Pinned versions (observed, not assumed)
+### Pinned versions (verified, not assumed)
 
-| Component | Version | Source of truth |
+| Component | Version | Why this value |
 |---|---|---|
-| Gradle (wrapper) | **9.6.1** | system Gradle via Homebrew, reported in its own error output |
-| Kotlin | **2.4.10** | current stable, [kotlinlang.org/docs/releases](https://kotlinlang.org/docs/releases.html) |
-| JDK (toolchain) | **17** | `/Library/Java/JavaVirtualMachines/jdk-17.jdk` (21 also present) |
+| Gradle (wrapper) | **9.5.0** | KGP 2.4.10's maximum *fully supported* Gradle. See note below. |
+| Kotlin / KGP | **2.4.10** | current stable, [kotlinlang.org/docs/releases](https://kotlinlang.org/docs/releases.html) |
+| JDK — launcher, daemon, toolchain | **17** | all three deliberately aligned; `/Library/Java/JavaVirtualMachines/jdk-17.jdk` |
+| foojay-resolver-convention | **1.0.0** | required for daemon-JVM auto-provisioning |
 
-`jvmToolchain(17)` resolves against the locally installed JDK 17 — no foojay resolver or auto-provisioning needed. The JDK that launches Gradle (Homebrew 23) is deliberately *not* the JDK we compile against; that decoupling is the point of E6.
+**Why Gradle 9.5.0 and not 9.6.1.** The system Gradle that bootstrapped the wrapper was 9.6.1, but KGP 2.4.10 lists Gradle **7.6.3 – 9.5.0** as its fully-supported range ([Kotlin: Configure a Gradle project](https://kotlinlang.org/docs/gradle-configure-project.html)); past that ceiling Kotlin warns of deprecation warnings and features that may not behave as expected. Milestone 1 would likely have been fine, but milestone 4 is configuration-cache-sensitive plugin work with TestKit — exactly where an untested pairing costs the most to debug. Downgrading was free; we gain nothing from 9.6.1.
 
-Build-with Gradle 9.6.1 versus the supported *floor* (D9) remains a milestone-4 question — `core` has no Gradle API surface, so milestones 1–3 are unaffected.
+**JDK alignment.** Launcher, daemon, and compile toolchain are all JDK 17 — one JVM, one daemon, no version straddling, and it matches AGP 8.x's stated requirement. The launcher JDK comes from `JAVA_HOME` in the developer's shell (unavoidably environmental — the `gradlew` script needs a JVM before any Gradle logic runs). The daemon JDK is pinned in-repo by `gradle/gradle-daemon-jvm.properties`. The compile JDK is pinned by the Java toolchain in build scripts.
+
+**Daemon JVM criteria.** `gradle/gradle-daemon-jvm.properties` is committed (generated via `./gradlew updateDaemonJvm --jvm-version=17`) so every contributor and CI runner gets an identical daemon JVM, auto-downloading one if absent. This requires the foojay resolver in `settings.gradle.kts` — without it the task fails with "Toolchain download repositories have not been configured." Note the generated URLs are opaque foojay redirect IDs pinning specific builds; good for reproducibility, but they are a external dependency that could rot, so treat regeneration as a routine maintenance action rather than a one-time event.
+
+### Carried forward
+
+- **D9 needs revision at milestone 4.** KGP 2.4.10 supports AGP **8.5.2 – 9.1.0**, which conflicts with §E2's provisional AGP 8.1 floor. The floor is about what *consumers* may use, not what we build with, but the `sample/` build and any TestKit matrix are constrained by this. Resolve when D9 is actually ruled.
+- Build-with Gradle 9.5.0 versus the supported *floor* remains a milestone-4 question — `core` has no Gradle API surface, so milestones 1–3 are unaffected.
