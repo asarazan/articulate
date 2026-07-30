@@ -14,17 +14,23 @@ with its verified behavior, a citation, a confidence marker, and the corpus case
 
 Three independent evidence classes, cited per rule:
 
-| Tag | Meaning |
-|---|---|
-| `[AOSP:<file>:<line>]` | Read directly from AAPT2 source. Source: `aosp-mirror/platform_frameworks_base`, branch `master`, paths relative to `tools/aapt2/`. Observed **2026-07-30**. |
-| `[EXP-aapt2]` | Reproduced by running a real `aapt2` binary: **AAPT 2.19-12006047** (ships with AGP 8.7.2), macOS 26.5.2, on **2026-07-30**. Compile + link + `aapt2 dump resources`. |
-| `[EXP-xcs]` | Reproduced by running **`xcstringstool`** from **Xcode 26.6 (17F113)**, on **2026-07-30**. `compile` a hand-written `.xcstrings` and inspect the emitted `.strings` / `.stringsdict`. |
-| `[DOC:<url>]` | Official vendor documentation. |
+| Tag | Meaning | Role |
+|---|---|---|
+| `[EXP-aapt2]` | Reproduced by running a real `aapt2` binary: **AAPT 2.19-12006047** (ships with AGP 8.7.2), macOS 26.5.2, on **2026-07-30**. Compile + link + `aapt2 dump resources`. | **Normative** |
+| `[EXP-xcs]` | Reproduced by running **`xcstringstool`** from **Xcode 26.6 (17F113)**, on **2026-07-30**. `compile` a hand-written `.xcstrings` and inspect the emitted `.strings` / `.stringsdict`. | **Normative** |
+| `[AOSP:<file> <Function>]` | Read from AAPT2 source: `aosp-mirror/platform_frameworks_base`, branch `master`, paths relative to `tools/aapt2/`. Observed **2026-07-30**. | Explanatory |
+| `[DOC:<url>]` | Official vendor documentation. | Explanatory (see warning below) |
+
+**Which citation is the real one.** The normative source of truth for this project is the *observable behavior of the shipped tools our users actually run* — not AOSP `master`. We are not implementing "whatever the AOSP source tree currently does"; we are implementing what a pinned `aapt2` and a pinned `xcstringstool` do. So every VERIFIED rule is warranted by a reproducible experiment against a pinned tool version, and §13 gives the exact recipe to re-run any of them.
+
+AOSP citations are **explanatory**: they answer *why* a behavior exists, which experiments cannot. That value is real — the AAPT1-compatibility comment behind the double-space-around-spans wart tells you the bug is deliberate and won't be fixed, which changes how you treat it — but it lives entirely in the function and its comments.
+
+**Citations therefore name functions, not line numbers.** Line numbers against a moving branch decay immediately and are worse than nothing: a stale one sends a reader to unrelated code and invites them to distrust claims that are actually correct. Function names (`StringBuilder::AppendText`, `ResourceParser::FlattenXmlSubtree`, `VerifyJavaStringFormat`, …) survive refactors and are directly greppable. If line-level precision is ever genuinely needed, pin a release tag or commit SHA rather than citing `master`.
 
 Confidence markers:
 
-- **VERIFIED** — confirmed by source **and/or** a reproduced experiment. Safe to write a parser against.
-- **BEST-EFFORT** — no definitive primary source found, or the source is a moving target; a judgment
+- **VERIFIED** — confirmed by a reproduced experiment against a pinned tool, usually corroborated by source. Safe to write a parser against.
+- **BEST-EFFORT** — no definitive primary source found, or not empirically exercised; a judgment
   call is recorded and flagged.
 
 > ⚠️ **A note on the official Android documentation.** During this research the official
@@ -69,8 +75,8 @@ roughly a dozen of the cases below.
   └───────────────────────────────────────────────────────────────────┘
 ```
 
-Source: `[AOSP:ResourceParser.cpp:247-390]` (S1/S2), `[AOSP:ResourceUtils.cpp:878-965]` (S3),
-`[AOSP:ResourceParser.cpp:825-845]` (S4), `[AOSP:ResourceParser.cpp:855-900]` (S5).
+Source: `[AOSP:ResourceParser.cpp ResourceParser::FlattenXmlSubtree]` (S1/S2), `[AOSP:ResourceUtils.cpp StringBuilder::AppendText]` (S3),
+`[AOSP:ResourceParser.cpp ResourceParser::ParseXml]` (S4), `[AOSP:ResourceParser.cpp ResourceParser::ParseString]` (S5).
 
 Three consequences that fall directly out of the ordering and are each a corpus case:
 
@@ -102,7 +108,7 @@ The complete set recognized by AAPT2 is:
 | `\uXXXX` | the code point; exactly 4 hex digits, else hard error |
 | `\` + *anything else* | **the backslash is discarded and the character is emitted literally** |
 
-`[AOSP:ResourceUtils.cpp:906-939]` `[EXP-aapt2]` `[DOC:https://developer.android.com/guide/topics/resources/string-resource]`
+`[AOSP:ResourceUtils.cpp StringBuilder::AppendText]` `[EXP-aapt2]` `[DOC:https://developer.android.com/guide/topics/resources/string-resource]`
 
 **[CORRECTS PLAN]** The plan lists `\'  \"  \n  \t  \\  \uXXXX`. It is **missing `\#`** entirely
 (`\#` → `#`; verified: `\#\@\?` → `#@?`). The plan also lists "leading `@`/`?`" as a separate row, but
@@ -118,7 +124,7 @@ silent-corruption vector: an author who writes `\r\n` gets `r` + newline. Articu
 ### E2 — Unicode escape must be exactly 4 hex digits — VERIFIED
 
 `\u` not followed by four valid hex digits is a hard error:
-`"invalid unicode escape sequence in string\n\"<text>\""` `[AOSP:ResourceUtils.cpp:926-932]`.
+`"invalid unicode escape sequence in string\n\"<text>\""` `[AOSP:ResourceUtils.cpp StringBuilder::AppendText]`.
 Note `\uXXXX` is UTF-16-ish in spelling but AAPT2 appends the code point directly — there is no
 surrogate-pair recombination of two adjacent `😀` escapes at this layer. **BEST-EFFORT**
 on the surrogate-pair question: not empirically exercised; treat astral characters written as
@@ -129,7 +135,7 @@ surrogate pairs as an Articulate error rather than guessing.
 ### E3 — Trailing lone backslash is silently dropped — VERIFIED
 
 If `\` is the last character, `iter.HasNext()` is false and nothing is appended.
-`abc\` → `abc` `[AOSP:ResourceUtils.cpp:906-907]` `[EXP-aapt2]`.
+`abc\` → `abc` `[AOSP:ResourceUtils.cpp StringBuilder::AppendText]` `[EXP-aapt2]`.
 
 - Corpus: **new:** `escapes-trailing-backslash`
 
@@ -155,7 +161,7 @@ trims second would produce `qz ` — wrong.
 ### Q1 — `"` is a *toggle*, not a delimiter pair — VERIFIED
 
 Each unescaped `"` flips a boolean. The quote characters themselves are **never emitted**. There is
-no "unbalanced quote" error. `[AOSP:ResourceUtils.cpp:940-943]`
+no "unbalanced quote" error. `[AOSP:ResourceUtils.cpp StringBuilder::AppendText]`
 
 Consequences, all verified `[EXP-aapt2]`:
 
@@ -177,7 +183,7 @@ it is almost always an authoring mistake and it changes the meaning of everythin
 
 `ResetTextState()` sets `quote_ = preserve_spaces_` (i.e. `false`) at the start and end of every span.
 A quoted region therefore **cannot span an inline tag**.
-`[AOSP:ResourceUtils.cpp:1025-1027]`, `[AOSP:ResourceUtils.h:255-259]`
+`[AOSP:ResourceUtils.cpp StringBuilder::ResetTextState]`, `[AOSP:ResourceUtils.h StringBuilder class doc comment]`
 
 Verified `[EXP-aapt2]`: `"x  <b>y</b>  z"` → `x  y z`. The two spaces before `<b>` survive (still
 quoted); the two spaces after `</b>` collapse to one (quoting was reset). **[NEW]** — the plan has
@@ -191,17 +197,17 @@ nothing on this and it is not intuitive.
 explicitly. Answer: it is **neither** XML attribute-value normalization **nor** `xml:space`. It is a
 bespoke pass in AAPT2's `StringBuilder`, applied to element *content* after XML parsing, and it is
 maintained bug-for-bug from AAPT1: `"NOTE: This is all the way it is because AAPT1 did it this way.
-Maintaining backwards compatibility is important."` `[AOSP:ResourceUtils.h:263-265]`
+Maintaining backwards compatibility is important."` `[AOSP:ResourceUtils.h StringBuilder class doc comment]`
 
 The rule: outside a quoted region, a run of one or more whitespace characters collapses to exactly
-one U+0020. `[AOSP:ResourceUtils.cpp:891-901]`
+one U+0020. `[AOSP:ResourceUtils.cpp StringBuilder::AppendText]`
 
 ### W2 — Leading/trailing whitespace: trimmed, **unless the string contains a span** — VERIFIED
 
 This is the answer to the "trimmed vs preserved" question, and it is conditional.
 
 - **No span anywhere in the string:** the first text run is left-trimmed and the last text run is
-  right-trimmed, on the raw text, before escape processing. `[AOSP:ResourceParser.cpp:360-378]`
+  right-trimmed, on the raw text, before escape processing. `[AOSP:ResourceParser.cpp ResourceParser::FlattenXmlSubtree]`
 - **Any no-namespace tag anywhere in the string:** trimming is skipped entirely, so leading and
   trailing whitespace survives — collapsed to a single space by W1, but **not removed**.
 
@@ -214,7 +220,7 @@ Verified `[EXP-aapt2]`:
 | `  <xliff:g id="x">A</xliff:g>  B  ` | `A B` (xliff:g is not a span, so trimming applies) |
 
 The AAPT2 header comment states the general case as *"This happens at the start and end of the string
-as well, so leading and trailing whitespace is possible"* `[AOSP:ResourceUtils.h:252-254]` — which is
+as well, so leading and trailing whitespace is possible"* `[AOSP:ResourceUtils.h StringBuilder class doc comment]` — which is
 true of `StringBuilder` in isolation, but `ResourceParser` pre-trims in the common (span-free) path.
 Both layers must be modeled; modeling only one gives the wrong answer for half the cases.
 
@@ -224,7 +230,7 @@ Both layers must be modeled; modeling only one gives the wrong answer for half t
 
 The collapse test is guarded by `codepoint <= std::numeric_limits<char>::max()` (i.e. ≤ 0x7F) before
 calling `isspace()`. Non-ASCII Unicode spaces are **not** whitespace for this purpose.
-`[AOSP:ResourceUtils.cpp:891-892]`
+`[AOSP:ResourceUtils.cpp StringBuilder::AppendText]`
 
 Verified `[EXP-aapt2]`, byte-for-byte:
 
@@ -281,7 +287,7 @@ The only reliable way to get a literal double quote is `\"`, and a literal apost
 
 ### A1 — A bare `'` outside quoting is a hard **error** — VERIFIED
 
-Answering the research question directly: **error, not warning.** `[AOSP:ResourceUtils.cpp:944-947]`
+Answering the research question directly: **error, not warning.** `[AOSP:ResourceUtils.cpp StringBuilder::AppendText]`
 
 Exact AAPT2 diagnostic (reproduced verbatim `[EXP-aapt2]`):
 
@@ -330,10 +336,10 @@ See §5. `<![CDATA[don't]]>` → same error `[EXP-aapt2]`. CDATA is not an escap
 `PLAN.md` §2.2 states: *"CDATA | content taken verbatim"*. **This is wrong.**
 
 Mechanism: AAPT2's XML layer registers `XML_SetCdataSectionHandler`, which pushes bare
-`kCdataStart` / `kCdataEnd` markers `[AOSP:xml/XmlPullParser.cpp:295-309]`. The *content* arrives
+`kCdataStart` / `kCdataEnd` markers `[AOSP:xml/XmlPullParser.cpp XmlPullParser::StartCdataSectionHandler]`. The *content* arrives
 through the ordinary `CharacterDataHandler` as a `kText` event
-`[AOSP:xml/XmlPullParser.cpp:254-260]`. `FlattenXmlSubtree`'s event switch has no case for
-`kCdataStart`/`kCdataEnd` — they fall to `default: // ignore` `[AOSP:ResourceParser.cpp:281-350]`.
+`[AOSP:xml/XmlPullParser.cpp XmlPullParser::CharacterDataHandler]`. `FlattenXmlSubtree`'s event switch has no case for
+`kCdataStart`/`kCdataEnd` — they fall to `default: // ignore` `[AOSP:ResourceParser.cpp ResourceParser::FlattenXmlSubtree]`.
 CDATA text is therefore fed to exactly the same `StringBuilder` as any other text.
 
 Verified consequences `[EXP-aapt2]`:
@@ -371,10 +377,10 @@ Answering the research question: it is **neither** verbatim pass-through **nor**
 round trip. Any element inside `<string>` with an **empty namespace** is converted into a
 `android::Span` — a `(name, start, end)` triple recorded in a channel *parallel* to the text — and the
 resource becomes a `StyledString` rather than a `String`
-`[AOSP:ResourceParser.cpp:287-303]`, `[AOSP:ResourceParser.cpp:806-814]`.
+`[AOSP:ResourceParser.cpp ResourceParser::FlattenXmlSubtree]`, `[AOSP:ResourceParser.cpp ResourceParser::ParseXml]`.
 
 The span name encodes attributes as `tag;attr=value;attr=value`
-`[AOSP:ResourceParser.cpp:292-300]`.
+`[AOSP:ResourceParser.cpp ResourceParser::FlattenXmlSubtree]`.
 
 Verified `[EXP-aapt2]` (from `aapt2 dump resources`, `name:start,end`):
 
@@ -393,7 +399,7 @@ Android itself**, and it is the only channel `.xcstrings` has.
 
 `ResetTextState()` clears the "last codepoint was a space" flag at every span start and end, so a
 space immediately adjacent to a tag is always emitted.
-`[AOSP:ResourceUtils.cpp:1025-1027]`, documented as a known wart at `[AOSP:ResourceUtils.h:256-259]`.
+`[AOSP:ResourceUtils.cpp StringBuilder::ResetTextState]`, documented as a known wart at `[AOSP:ResourceUtils.h StringBuilder class doc comment]`.
 
 Verified `[EXP-aapt2]`: `This <b> is </b> spaced` → `This␣␣is␣␣spaced` — **double** spaces, whereas
 the same string without tags collapses correctly. This is an AAPT1-compatibility bug that AAPT2
@@ -404,7 +410,7 @@ deliberately preserves.
 ### M3 — Spans **bypass** format-string verification — VERIFIED, safety-relevant
 
 `VerifyJavaStringFormat` runs only on the `String` branch of `ParseString`; the `StyledString` branch
-sets translatable and returns without checking `[AOSP:ResourceParser.cpp:886-905]`.
+sets translatable and returns without checking `[AOSP:ResourceParser.cpp ResourceParser::ParseString]`.
 
 Verified `[EXP-aapt2]`: `%s and %d` → **hard error** (non-positional, 2 args).
 `%s and <b>%d</b>` → **compiles clean**, spans `b:7,8`.
@@ -418,17 +424,17 @@ it cannot inherit AAPT2's, because AAPT2 has a hole here.
 ### M4 — `<xliff:g>` marks an untranslatable section, not a span — VERIFIED **[NEW — entirely missing from the plan]**
 
 The XLIFF 1.2 namespace `urn:oasis:names:tc:xliff:document:1.2` is special-cased
-`[AOSP:ResourceParser.cpp:49]`. `<xliff:g>` produces an `UntranslatableSection` (a start/end index
-pair), **not** a span `[AOSP:ResourceParser.cpp:304-318]`. Consequences:
+`[AOSP:ResourceParser.cpp kXliffNamespaceUri]`. `<xliff:g>` produces an `UntranslatableSection` (a start/end index
+pair), **not** a span `[AOSP:ResourceParser.cpp ResourceParser::FlattenXmlSubtree]`. Consequences:
 
 - The resource stays a plain `String`, so **format verification still runs** (unlike M3).
 - Whitespace collapses **correctly** across the boundary — explicitly contrasted against the span bug
-  at `[AOSP:ResourceUtils.h:261-262]`. Verified: `This <xliff:g id="n">is</xliff:g> spaced` →
+  at `[AOSP:ResourceUtils.h StringBuilder class doc comment]`. Verified: `This <xliff:g id="n">is</xliff:g> spaced` →
   `This is spaced` (single spaces) `[EXP-aapt2]`.
 - Edge trimming still applies, because `saw_span_node` stays false. Verified:
   `  <xliff:g id="x">A</xliff:g>  B  ` → `A B` `[EXP-aapt2]`.
-- Nested `<xliff:g>` is a hard error: `illegal nested XLIFF 'g' tag` `[AOSP:ResourceParser.cpp:310-313]`.
-- Non-`g` XLIFF tags are silently ignored, with no warning `[AOSP:ResourceParser.cpp:319-322]`.
+- Nested `<xliff:g>` is a hard error: `illegal nested XLIFF 'g' tag` `[AOSP:ResourceParser.cpp ResourceParser::FlattenXmlSubtree]`.
+- Non-`g` XLIFF tags are silently ignored, with no warning `[AOSP:ResourceParser.cpp ResourceParser::FlattenXmlSubtree]`.
 
 **This matters a great deal.** `<xliff:g id="name" example="Bob">%1$s</xliff:g>` is the *recommended*
 idiom for annotating placeholders in Android string resources, and it is extremely common in
@@ -449,7 +455,7 @@ question would be a category error.
 
 Any other namespaced element produces
 `warn: ignoring element '<name>' with unknown namespace '<uri>'`, the tag is dropped and its children
-are kept `[AOSP:ResourceParser.cpp:323-329]` `[EXP-aapt2]`. Relevant for `tools:` attributes and
+are kept `[AOSP:ResourceParser.cpp ResourceParser::FlattenXmlSubtree]` `[EXP-aapt2]`. Relevant for `tools:` attributes and
 stray namespaced markup.
 
 - Corpus: **new:** `foreign-namespace-warn`
@@ -461,7 +467,7 @@ stray namespaced markup.
 ### K1 — Resource entry name grammar — VERIFIED
 
 **[CORRECTS PLAN]** The plan says "must be a valid Android resource name" without specifying it.
-The actual grammar `[AOSP:text/Unicode.cpp:102-124]`:
+The actual grammar `[AOSP:text/Unicode.cpp IsValidResourceEntryName]`:
 
 ```
 entry-name  ::=  first  rest*
@@ -471,16 +477,16 @@ rest        ::=  <any codepoint with Unicode XID_Continue>  |  '.'  |  '-'
 
 - **Cannot start with a digit** (digits are XID_Continue but not XID_Start). Verified: `1abc` →
   `error: resource 'string/1abc' has invalid entry name '1abc` `[EXP-aapt2]`. (The unbalanced quote
-  is AAPT2's own bug, reproduced verbatim `[AOSP:ResourceTable.cpp:553-556]`.)
+  is AAPT2's own bug, reproduced verbatim `[AOSP:ResourceTable.cpp ResourceTable::AddResource]`.)
 - **`$` is not allowed** in a resource entry name — unlike a Java identifier, where it is. Verified:
   `a$b` rejected `[EXP-aapt2]`. This is the one place `IsValidResourceEntryName` deliberately diverges
-  from `IsJavaIdentifier` `[AOSP:text/Unicode.cpp:78-100]`.
+  from `IsJavaIdentifier` `[AOSP:text/Unicode.cpp IsJavaIdentifier]`.
 - **`.` and `-` are allowed** and are *not* Java identifier characters. Verified: `a.b` and `a-b` both
   compile clean `[EXP-aapt2]`.
 - **Non-ASCII identifiers are allowed.** Verified: `héllo` compiles `[EXP-aapt2]`.
 - **Case-sensitive**, no case folding. `MyKey` compiles and stays `MyKey` `[EXP-aapt2]`.
 - **No reserved words.** `IsJavaIdentifier`'s own comment says *"This does not check against the set
-  of reserved Java keywords"* `[AOSP:text/Unicode.h:47-48]`, and `IsValidResourceEntryName` is even
+  of reserved Java keywords"* `[AOSP:text/Unicode.h IsJavaIdentifier doc comment]`, and `IsValidResourceEntryName` is even
   looser. Verified: `class` compiles as a key `[EXP-aapt2]`.
 
 **[NEW] Articulate should be stricter than AAPT2 here.** `.` and `-` are legal in `strings.xml` but
@@ -498,7 +504,7 @@ strings will not produce usable generated symbols.
 **[CONFIRMS PLAN, now with a citation.]** The plan asserted "error" without a source. Confirmed.
 
 Two strong non-attribute values for the same (name, config) resolve to `CollisionResult::kConflict`
-`[AOSP:ResourceTable.cpp:313-328]`, which emits `[AOSP:ResourceTable.cpp:692-697]`:
+`[AOSP:ResourceTable.cpp ResourceTable::ResolveValueCollision]`, which emits `[AOSP:ResourceTable.cpp ResourceTable::AddResource]`:
 
 ```
 res/values/strings.xml:3: error: duplicate value for resource 'string/a' with config ''.
@@ -513,11 +519,11 @@ of course fine — that is the whole point.
 
 ### K3 — Duplicate `<item quantity=…>` in one `<plurals>` is a hard error — VERIFIED **[NEW]**
 
-`error: duplicate quantity 'one'` `[AOSP:ResourceParser.cpp:1763-1766]` `[EXP-aapt2]`.
+`error: duplicate quantity 'one'` `[AOSP:ResourceParser.cpp ResourceParser::ParsePlural]` `[EXP-aapt2]`.
 An invalid quantity keyword is likewise a hard error:
 `error: <item> in <plural> has invalid value 'six' for attribute 'quantity'`
-`[AOSP:ResourceParser.cpp:1753-1759]` `[EXP-aapt2]`. The six legal keywords are exactly
-`zero one two few many other` `[AOSP:ResourceParser.cpp:1740-1752]`.
+`[AOSP:ResourceParser.cpp ResourceParser::ParsePlural]` `[EXP-aapt2]`. The six legal keywords are exactly
+`zero one two few many other` `[AOSP:ResourceParser.cpp ResourceParser::ParsePlural]`.
 
 - Corpus: **new:** `error-duplicate-quantity`, **new:** `error-bad-quantity`
 
@@ -527,7 +533,7 @@ An invalid quantity keyword is likewise a hard error:
 parse."* The first half misstates the failure mode, and the failure mode is the dangerous part.
 
 `ParseXml` tries `TryParseItemForAttribute` on the **raw** (pre-escape) value *before* falling back to
-a string `[AOSP:ResourceParser.cpp:825-838]`. So:
+a string `[AOSP:ResourceParser.cpp ResourceParser::ParseXml]`. So:
 
 - `<string name="a">@string/other</string>` **compiles clean** `[EXP-aapt2]`. It is not a string at
   all — it is a *reference*. If `string/other` exists, it silently aliases. If it does not, the failure
@@ -543,7 +549,7 @@ references, and silently emitting the literal text `@string/other` into a transl
 ship the reference syntax to users.
 
 **Only `@` and `?` are affected.** `ParseString` passes a type mask of `TYPE_STRING` alone
-`[AOSP:ResourceParser.cpp:879-881]`, so color/integer/boolean parsing is not in play — references are
+`[AOSP:ResourceParser.cpp ResourceParser::ParseString]`, so color/integer/boolean parsing is not in play — references are
 matched unconditionally, everything else is not. Verified `[EXP-aapt2]`: `#FF0000`, `42`, `true` and
 `+15551234` all stay plain strings inside `<string>`. `\#` remains a valid escape (E1) but escaping
 `#` is not *required* here; it matters in other resource contexts.
@@ -555,8 +561,8 @@ matched unconditionally, everything else is not. Verified `[EXP-aapt2]`: `#FF000
 
 Documented semantics: the attribute is parsed as a boolean (an unparseable value is a hard error,
 `invalid value for 'translatable'. Must be a boolean`) and sets a flag on the value
-`[AOSP:ResourceParser.cpp:868-888]`. It is also accepted on `<string-array>`
-`[AOSP:ResourceParser.cpp:1653-1663]`.
+`[AOSP:ResourceParser.cpp ResourceParser::ParseString]`. It is also accepted on `<string-array>`
+`[AOSP:ResourceParser.cpp ResourceParser::ParseArrayImpl]`.
 
 **[CONFIRMS PLAN's split.]** The plan asks: *"excluded from catalog entirely (and from Android copy?
 no — copied for Android, skipped for iOS)"*. Confirmed: the string **is** compiled into the Android
@@ -608,7 +614,7 @@ Confirmed as-is.
 ### K7 — `formatted="false"` — VERIFIED **[NEW — missing from the plan entirely]**
 
 `<string name="x" formatted="false">` disables `VerifyJavaStringFormat` for that string
-`[AOSP:ResourceParser.cpp:857-865, 889]`. Verified `[EXP-aapt2]`: `%s and %s` errors normally but
+`[AOSP:ResourceParser.cpp ResourceParser::ParseString]`. Verified `[EXP-aapt2]`: `%s and %s` errors normally but
 compiles clean with `formatted="false"`.
 
 Semantically it declares *"the `%` characters in here are literal, this string is never passed to
@@ -626,7 +632,7 @@ real conversion, not a pass-through, and the plan has no rule for it.
 ### P0 — Positional discipline: **VERIFIED, and it is AAPT2's default** — plan confirmed
 
 `VerifyJavaStringFormat` returns false when `arg_count > 1 && nonpositional`
-`[AOSP:util/Util.cpp:267-350]`. `aapt2 compile` treats that as a **hard error** by default:
+`[AOSP:util/Util.cpp VerifyJavaStringFormat]`. `aapt2 compile` treats that as a **hard error** by default:
 
 ```
 error: multiple substitutions specified in non-positional format;
@@ -642,14 +648,14 @@ Two refinements the plan does not capture:
 
 - **`%<` (argument reuse) counts as non-positional** and triggers the error, with the source comment
   *"Reusing last argument, bad idea since positions can be moved around during translation"*
-  `[AOSP:util/Util.cpp:290-301]`. Verified `[EXP-aapt2]`. Articulate should reject `%<` outright —
+  `[AOSP:util/Util.cpp VerifyJavaStringFormat]`. Verified `[EXP-aapt2]`. Articulate should reject `%<` outright —
   iOS has no equivalent.
 - **[NEW] The check has two holes**, both verified, both of which Articulate must close because it
   cannot rely on AAPT2 having caught them:
   1. **Styled strings skip it entirely** (M3).
   2. **A `Time.format` look-alike short-circuits it.** If any conversion character is one of
      `D F K M W Z k m w y z`, `VerifyJavaStringFormat` **returns true immediately**, abandoning the
-     rest of the scan `[AOSP:util/Util.cpp:335-350]`. Verified `[EXP-aapt2]`: `%y and %s and %d` —
+     rest of the scan `[AOSP:util/Util.cpp VerifyJavaStringFormat]`. Verified `[EXP-aapt2]`: `%y and %s and %d` —
      three non-positional arguments — **compiles clean**.
 
 - Corpus: `error-nonpositional-multi`, **new:** `error-arg-reuse`, **new:** `error-time-format-shortcircuit`, **new:** `error-styled-nonpositional`
@@ -822,24 +828,33 @@ the project's own thesis and should be quoted in the README.
 
 Verified against `xcstringstool` from Xcode 26.6 `[EXP-xcs]`.
 
-### T1 — `"state": "new"` silently deletes the string — VERIFIED **[NEW]**
+### T1 — `"state": "new"` drops the string **only when `extractionState` is absent** — VERIFIED, **CORRECTED 2026-07-30**
 
-Compiling one entry per state value and counting emitted `.strings` files:
+> ⚠️ **This rule was wrong in the first revision of this document.** It claimed `state: "new"` causes
+> silent deletion *unconditionally*. An independent re-run against the same `xcstringstool` 26.6
+> found the behavior is conditional. The original claim was the highest-consequence item in this
+> document, which is exactly why it was re-tested. Corrected below.
 
-| `state` | emitted? |
-|---|---|
-| `translated` | yes |
-| `needs_review` | yes |
-| `stale` | yes |
-| `reviewed` (not a real state) | yes |
-| `bogus` (garbage) | yes |
-| **`new`** | **NO — silently dropped, no diagnostic** |
+Compiling one entry per state value and inspecting the emitted `.strings`:
 
-**Articulate must never emit `"state": "new"`.** A converted string is by definition a supplied
-translation; emit `"translated"`. Emitting `new` produces a build that is missing strings with no
-error anywhere — the worst possible failure mode for this project. This is a mandatory corpus assertion.
+| entry | `state: "new"` | other states (`translated`, `needs_review`, `stale`, `reviewed`, garbage) |
+|---|---|---|
+| with `"extractionState": "manual"` | **emitted** | all emitted |
+| with no `extractionState` key | **silently dropped, no diagnostic** | `translated` / `stale` siblings in the same file survive |
 
-- Corpus: **new:** `xcstrings-state-translated`
+The coherent model: an absent `extractionState` combined with `new` reads as *"Xcode extracted this
+string from source and nobody has translated it yet"*, so it is dropped and the key falls back at
+runtime. An explicit `manual` means the author owns the entry, so it is respected whatever its state.
+
+**Articulate must emit both `"extractionState": "manual"` and `"state": "translated"`** — which the
+settled decisions already require. That places generated catalogs in the protected branch on two
+independent counts, and is a concrete argument against ever making either value configurable.
+
+The corpus assertion must check the **conjunction**, not `state` alone: asserting only
+`state == "translated"` would still pass if `extractionState` were ever dropped from the output,
+which is the configuration that actually loses strings.
+
+- Corpus: **new:** `xcstrings-state-translated` (assert both fields)
 
 ### T2 — Plural variations **require a numeric specifier** — VERIFIED **[NEW — the one thing Xcode does validate]**
 
@@ -914,7 +929,7 @@ plan's positional-discipline rule.
 ### T4 — All six CLDR categories are accepted — VERIFIED
 
 `zero one two few many other` all compile into a `.stringsdict` `[EXP-xcs]`, matching Android's
-keyword set exactly `[AOSP:ResourceParser.cpp:1740-1752]`
+keyword set exactly `[AOSP:ResourceParser.cpp ResourceParser::ParsePlural]`
 `[DOC:https://developer.android.com/guide/topics/resources/string-resource]`. **The plural quantity
 mapping is identity.** No `other`-required check is enforced by Xcode (a plural with only `one`
 compiled fine `[EXP-xcs]`), so Articulate should enforce it: Android's docs instruct authors to
@@ -1068,8 +1083,36 @@ $(xcode-select -p)/usr/bin/xcstringstool compile --output-directory out Localiza
 plutil -p out/en.lproj/Localizable.stringsdict
 ```
 
-AOSP sources read from `https://raw.githubusercontent.com/aosp-mirror/platform_frameworks_base/master/tools/aapt2/…`
-on 2026-07-30. Because `master` moves, line numbers in this document should be treated as
-*approximate anchors*; the function names (`StringBuilder::AppendText`, `FlattenXmlSubtree`,
-`ParseString`, `VerifyJavaStringFormat`, `IsValidResourceEntryName`, `ResourceTable::AddResource`)
-are stable and are the real citation.
+**This recipe is the citation.** Any VERIFIED rule in this document can be re-run from here against
+the same pinned tool versions; that reproducibility, not the source references, is what makes the
+rule checkable. Re-running is cheap and expected — do it whenever a rule looks surprising, and
+whenever `aapt2` or Xcode moves.
+
+AOSP sources read from
+`https://raw.githubusercontent.com/aosp-mirror/platform_frameworks_base/master/tools/aapt2/…` on
+2026-07-30, cited by **function name** rather than line number (see §0 for why). To locate one:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/aosp-mirror/platform_frameworks_base/master/tools/aapt2/ResourceUtils.cpp \
+  | grep -n "StringBuilder::AppendText"
+```
+
+Functions referenced: `StringBuilder::AppendText`, `StringBuilder::ResetTextState`,
+`ResourceParser::FlattenXmlSubtree`, `ResourceParser::ParseXml`, `ResourceParser::ParseString`,
+`ResourceParser::ParsePlural`, `ResourceParser::ParseArrayImpl`, `ResourceTable::AddResource`,
+`ResourceTable::ResolveValueCollision`, `VerifyJavaStringFormat`, `IsValidResourceEntryName`,
+`IsJavaIdentifier`, `XmlPullParser::CharacterDataHandler`,
+`XmlPullParser::StartCdataSectionHandler`.
+
+### Verification history
+
+| Date | What | Outcome |
+|---|---|---|
+| 2026-07-30 | Original research pass (`aapt2` 2.19, `xcstringstool` 26.6, AOSP source) | This document |
+| 2026-07-30 | Independent re-run of 11 Android-side rules, byte-checked with `xxd` | All reproduced |
+| 2026-07-30 | Independent re-run of 7 target-side rules | 6 reproduced; **`state: "new"` corrected** — the drop is conditional on `extractionState` being absent, not unconditional (see T1) |
+
+Still single-sourced, not independently re-run: the Java-side comparisons in §8
+(`%g` trailing zeros, `HALF_UP` vs half-to-even rounding, locale-formatting divergence). These need
+a JDK 17 run plus a Swift/C comparison. `%g` gates a hard-error rule, so close it before that error
+message ships.
