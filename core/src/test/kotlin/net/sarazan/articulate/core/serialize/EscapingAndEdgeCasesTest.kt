@@ -44,8 +44,20 @@ class EscapingAndEdgeCasesTest {
     }
 
     @Test
-    fun `control characters are escaped, not written literally`() {
-        assertEquals("\"a\\nb\\tc\"", renderSingleValue("a\nb\tc"))
+    fun `control characters with named JSON shorthands are escaped, not written literally`() {
+        // \n \t \r \b \f each have a 2-character shorthand in the JSON spec and must
+        // use it rather than falling through to the generic \uXXXX path. Kotlin has no
+        // \f escape (unlike Java), so form feed is written as \u000C here.
+        val input = "a\nb\tc\rd\be\u000Cf"
+        assertEquals("\"a\\nb\\tc\\rd\\be\\ff\"", renderSingleValue(input))
+    }
+
+    @Test
+    fun `control characters without a named shorthand fall back to lowercase 4-digit backslash-u escapes`() {
+        // U+0001 (SOH) has no JSON shorthand, so it must hit the generic branch.
+        // Also pins CanonicalFormat.LOWERCASE_HEX_ESCAPES: lowercase "a" not "A".
+        val input = "x\u0001y"
+        assertEquals("\"x\\u0001y\"", renderSingleValue(input))
     }
 
     @Test

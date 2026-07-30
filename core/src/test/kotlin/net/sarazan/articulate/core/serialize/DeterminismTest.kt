@@ -1,7 +1,6 @@
 package net.sarazan.articulate.core.serialize
 
 import org.junit.jupiter.api.Assertions.assertArrayEquals
-import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -22,24 +21,24 @@ class DeterminismTest {
     }
 
     @Test
-    fun `map insertion order does not affect output`() {
-        assertEquals(
-            XcstringsWriter.write(TestCatalogs.sample()),
-            XcstringsWriter.write(TestCatalogs.sampleShuffled()),
+    fun `map insertion order does not affect output bytes`() {
+        assertArrayEquals(
+            XcstringsWriter.writeBytes(TestCatalogs.sample()),
+            XcstringsWriter.writeBytes(TestCatalogs.sampleShuffled()),
         )
     }
 
     @Test
-    fun `output is identical under a Turkish default locale`() {
+    fun `output bytes are identical under a Turkish default locale`() {
         // The classic trap: no-arg toUpperCase()/toLowerCase() and some formatting
         // calls consult Locale.getDefault(). MEMBER_ORDER uses naturalOrder(),
         // i.e. code-unit comparison, which should never be locale-sensitive -- this
         // test exists to catch a future change that accidentally introduces one.
-        val expected = XcstringsWriter.write(TestCatalogs.sample())
+        val expected = XcstringsWriter.writeBytes(TestCatalogs.sample())
         val previous = Locale.getDefault()
         Locale.setDefault(Locale.forLanguageTag("tr"))
         try {
-            assertEquals(expected, XcstringsWriter.write(TestCatalogs.sample()))
+            assertArrayEquals(expected, XcstringsWriter.writeBytes(TestCatalogs.sample()))
         } finally {
             Locale.setDefault(previous)
         }
@@ -54,7 +53,7 @@ class DeterminismTest {
 
     @Test
     fun `output uses LF only, never CRLF`() {
-        val text = String(XcstringsWriter.writeBytes(TestCatalogs.sample()), Charsets.UTF_8)
+        val text = String(XcstringsWriter.writeBytes(TestCatalogs.sample()), CanonicalFormat.CHARSET)
         assertFalse(text.contains("\r"))
     }
 

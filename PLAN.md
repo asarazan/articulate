@@ -27,12 +27,13 @@ This split exists so the hard, correctness-critical work (serialization, escapin
 Immutable data classes, no JSON types leaking out:
 
 ```
-StringCatalog(sourceLanguage: String, entries: SortedMap<Key, Entry>)
-Entry(comment: String?, extractionState = MANUAL, localizations: SortedMap<LocaleTag, Localization>)
-Localization = Unit(value, state = TRANSLATED) | PluralVariations(SortedMap<PluralCategory, Unit>)
+StringCatalog(sourceLanguage: String, entries: Map<StringKey, Entry>)
+Entry(comment: String?, localizations: Map<LocaleTag, Localization>)
+Localization = Simple(StringUnit) | Plural(Map<PluralCategory, StringUnit>)
 ```
 
-- `state: "translated"` and `extractionState: "manual"` are constants, not options (settled decision — the catalog is a build artifact; state lives upstream).
+- `state: "translated"` and `extractionState: "manual"` are constants, not options (settled decision — the catalog is a build artifact; state lives upstream) — and are correspondingly absent from the model entirely, living only in `CanonicalFormat`, not as defaulted fields on `Entry`/`StringUnit`.
+- **Implemented as `Map`, not `SortedMap`** (revised from this section's original illustrative sketch, 2026-07-30, during milestone-1 audit): sorting is the serializer's responsibility alone, applied once in `CanonicalJson.appendObject` at every level, rather than a property callers must maintain by constructing the right map type. A `HashMap` and a `LinkedHashMap` with different insertion order are required to serialize identically — this is exactly what `DeterminismTest`'s insertion-order test holds — which is a stronger, tested guarantee than `SortedMap` typing would have provided on its own (a `SortedMap` built with an inconsistent comparator would silently produce wrong order with no test to catch it).
 - The catalog `version` is **not** in the model. It is a single constant, `CanonicalFormat.VERSION`, sourced from the human fixture (§1.4). Until the fixture lands it holds a clearly-marked placeholder (`"1.0" /* PROVISIONAL — pending fixture, see fixtures/xcode/README.md */`).
 
 ### 1.2 Serializer

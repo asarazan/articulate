@@ -53,6 +53,14 @@ object CanonicalFormat {
     /** LF, never CRLF. Not expected to be in question. */
     const val LINE_ENDING: String = "\n"
 
+    /**
+     * UTF-8, no BOM. [Charsets.UTF_8]'s encoder never emits a byte-order mark, so
+     * this is effectively invariant rather than fixture-dependent — but it is a
+     * named constant here regardless, so nothing downstream needs to know that
+     * fact on its own.
+     */
+    val CHARSET: java.nio.charset.Charset = Charsets.UTF_8
+
     /** PROVISIONAL — file ends with a newline. */
     const val TRAILING_NEWLINE: Boolean = true
 

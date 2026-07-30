@@ -81,7 +81,7 @@ private fun StringBuilder.appendEscaped(raw: String) {
             ch == '\r' -> append("\\r")
             ch == '\t' -> append("\\t")
             ch == '\b' -> append("\\b")
-            ch == '' -> append("\\f")
+            ch == '\u000C' -> append("\\f")
             ch < ' ' -> {
                 val code = ch.code
                 append("\\u")

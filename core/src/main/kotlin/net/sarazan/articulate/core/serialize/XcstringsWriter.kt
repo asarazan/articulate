@@ -20,8 +20,8 @@ object XcstringsWriter {
     /** Canonical text for [catalog]. */
     fun write(catalog: StringCatalog): String = catalog.toJson().renderCanonical()
 
-    /** Canonical bytes for [catalog]: UTF-8, no BOM — what gets committed to disk. */
-    fun writeBytes(catalog: StringCatalog): ByteArray = write(catalog).toByteArray(Charsets.UTF_8)
+    /** Canonical bytes for [catalog] — what gets committed to disk. */
+    fun writeBytes(catalog: StringCatalog): ByteArray = write(catalog).toByteArray(CanonicalFormat.CHARSET)
 }
 
 private fun StringCatalog.toJson(): JsonValue.Obj = JsonValue.Obj(
