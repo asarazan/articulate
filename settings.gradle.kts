@@ -5,4 +5,16 @@ plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
+dependencyResolutionManagement {
+    // Repositories live here, not in module build files, so a stray project-level
+    // repository can't silently change where artifacts resolve from.
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        mavenCentral()
+    }
+}
+
 rootProject.name = "articulate"
+
+// `plugin` and `sample` land in milestone 4 (D1: multi-module).
+include("core")
