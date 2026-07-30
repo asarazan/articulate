@@ -180,7 +180,11 @@ Parsing uses a standard StAX/DOM XML parser with DTD/external-entity resolution 
 
 **Verification status of the Android-side rules (2026-07-30).** The rules above came from a research agent; a second pass then *independently re-ran* a subset against the same aapt2 2.19 binary, without reusing the agent's outputs. Reproduced exactly, byte-checked where relevant: ASCII-only whitespace collapse (`x&#32;&#8200;&#8195;y` → `78 20 e2 80 88 e2 80 83 79`, i.e. U+2008/U+2003 preserved uncollapsed — Google's docs really are wrong); `&#160;` pairs preserved; TAB/LF/CR collapsing to one space; `\r` → literal `r`; `\#\@\?` → `#@?`; trailing lone `\` dropped; trim-before-escape ordering; the entity trace above; `<b>` edge-retention vs `<xliff:g>` trimming; span double-space; quote-reset-at-span; escaped-`@` yielding literal text.
 
-**Not independently re-verified, and flagged as such:** the AOSP line-number citations (the source doc notes `master` moves and calls them approximate anchors — the function names are the real citation); every `.xcstrings`/`xcstringstool` claim in §2.6 and the plural numeric-specifier rule in §2.4; and the Java-side comparisons in §2.3 (`%g` trailing zeros, rounding mode, locale formatting). Those remain single-sourced. Re-running the `xcstringstool` experiments is cheap — Xcode 26.6 build 17F113 is on this machine and matches the research environment exactly — and is worth doing before implementing §2.6, since the `state: "new"` silent-deletion claim is the highest-consequence unverified item in the whole spec.
+**Target-side rules were also independently re-run** against `xcstringstool` from Xcode 26.6 (17F113), the same version as the original research. Reproduced exactly: the plural numeric-specifier requirement (verbatim error message; `%@` does not satisfy it; one conforming variant suffices; `other` genuinely not required by Xcode); `NSStringFormatValueTypeKey` derived straight from the specifier (`%lld`→`lld`, `%d`→`d`, confirming D3 is load-bearing for plurals); the total absence of validation (arity mismatch, positional type swap, a literal `%s`, empty keys, dotted/dashed keys, `class`, and keys containing spaces all compiled clean with zero diagnostics); `shouldTranslate: false` emitting its value into the build; and fully lossless escaping (leading/trailing spaces, newlines, tabs, quotes, backslashes, CJK and NBSP all round-trip verbatim).
+
+**One claim did not survive re-testing** — the `state: "new"` rule, corrected in §2.6. It was the highest-consequence item in the spec, which is precisely why it was worth re-running.
+
+**Still single-sourced, not re-verified:** the AOSP line-number citations (the source doc notes `master` moves and calls them approximate anchors — the function names are the real citation), and the Java-side comparisons in §2.3 (`%g` trailing zeros, `HALF_UP` vs half-to-even rounding, locale-formatting divergence). The latter need a JDK 17 run plus a Swift/C comparison to close; none of them block M2's parser, but `%g` gates a hard-error rule so it should be confirmed before that error message ships.
 
 ### D4 — inline markup & CDATA policy — DECIDED (2026-07-30)
 
@@ -257,7 +261,16 @@ Settled: `comment` field populated from XML comments. Rule: an XML comment immed
 
 Rules with no Android-side counterpart, verified against `xcstringstool` from Xcode 26.6:
 
-- **Never emit `"state": "new"`.** Verified: of every state value tested — `translated`, `needs_review`, `stale`, a made-up `reviewed`, outright garbage — **only `new` causes the string to be silently dropped from the build**, with no diagnostic anywhere. A converted string is by definition a supplied translation, so we always emit `translated` (already a `CanonicalFormat` constant from milestone 1, which this retroactively validates as load-bearing rather than merely tidy). Mandatory corpus assertion: `xcstrings-state-translated`.
+- **Never emit `"state": "new"` — but the rule is narrower than first recorded (corrected 2026-07-30 by independent re-test).** The original research claim was that `state: "new"` unconditionally causes silent deletion. Re-running it found the drop is **conditional on `extractionState` being absent**:
+
+  | entry | `state: "new"` result |
+  |---|---|
+  | with `"extractionState": "manual"` | **emitted** — as are `translated`, `needs_review`, `stale`, a made-up `reviewed`, and outright garbage |
+  | with no `extractionState` key at all | **silently dropped**, no diagnostic (`translated` and `stale` siblings in the same file survive) |
+
+  The coherent model: absent `extractionState` + `new` reads as "Xcode extracted this from source and nobody has translated it yet" → dropped so the key falls back. An explicit `manual` means the author owns the entry → respected.
+
+  **This makes our position doubly safe rather than newly risky:** we always emit *both* `extractionState: "manual"` *and* `state: "translated"`, so we are in the protected branch on two independent counts. Both remain `CanonicalFormat` constants from milestone 1, and this is a real reason not to make either configurable. Corpus assertion `xcstrings-state-translated` stands, but it must assert the *conjunction*, not `state` alone.
 - **`shouldTranslate: false`** is the native equivalent of Android's `translatable="false"` — verified one-for-one: the entry compiles normally and its value *is* emitted into the built `.strings`, i.e. excluded from translation, not from the build. See the D-ruling below.
 - **Escaping is plain JSON escaping.** No quoting convention, no apostrophe rule, no whitespace collapsing; leading/trailing spaces, newlines and tabs round-trip verbatim. **The conversion is therefore lossless on the escaping axis** — every value Android's pipeline can produce is representable. Our escaping job is exactly: undo Android's layer, then JSON-encode. Corpus: `xcstrings-json-escaping`.
 - **`.xcstrings` imposes no key constraints at all** — empty keys, `a.b-c`, `class`, keys with spaces all compile. All key validation is Android-side plus symbol-generation-side (see the key-legality row in §2.2).
