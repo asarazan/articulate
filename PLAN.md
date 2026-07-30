@@ -380,23 +380,23 @@ Plus one **pending input, not a decision**: the Xcode fixture trio (§1.4) — `
 
 Generating a Gradle wrapper requires an existing Gradle — chicken-and-egg. This machine has no `gradle` on `PATH` and no linked JDK (Homebrew `openjdk` 23 is installed but unlinked). Resolved once by a human, then never again: every subsequent invocation is `./gradlew`.
 
-**Route A — Android Studio (no installs).** Create a throwaway project via the New Project wizard, then copy its four wrapper artifacts into this repo:
-```
-gradlew
-gradlew.bat
-gradle/wrapper/gradle-wrapper.jar
-gradle/wrapper/gradle-wrapper.properties
-```
-Delete the throwaway. `chmod +x gradlew`.
+**Correction (2026-07-30):** `gradle wrapper` cannot run in an empty directory — modern Gradle's `wrapper` task requires an existing build, so a settings file must come first. Sequence below is the corrected one.
 
-**Route B — Homebrew (one command, one-time install).**
-```bash
-brew install gradle && cd /Users/asarazan/projects/articulate && gradle wrapper
-```
+1. A minimal `settings.gradle.kts` (just `rootProject.name`) — no versions, no modules, committed already.
+2. `gradle wrapper` using the system Gradle, once:
+   ```bash
+   cd /Users/asarazan/projects/articulate && gradle wrapper
+   ```
+3. Thereafter `./gradlew` only; the system Gradle is never needed again and may be uninstalled.
 
-**Report back three values** so build files are pinned against reality rather than guessed:
-1. `distributionUrl` from `gradle/wrapper/gradle-wrapper.properties` (the Gradle version)
-2. Output of `./gradlew --version` (confirms the wrapper runs, and names the JDK it found)
-3. Android Studio's bundled JDK version, if using Route A (Settings → Build Tools → Gradle → Gradle JDK)
+### Pinned versions (observed, not assumed)
 
-Everything else — `settings.gradle.kts`, `build.gradle.kts`, `gradle/libs.versions.toml`, `core/build.gradle.kts` — is plain text requiring no toolchain, written once those versions are known.
+| Component | Version | Source of truth |
+|---|---|---|
+| Gradle (wrapper) | **9.6.1** | system Gradle via Homebrew, reported in its own error output |
+| Kotlin | **2.4.10** | current stable, [kotlinlang.org/docs/releases](https://kotlinlang.org/docs/releases.html) |
+| JDK (toolchain) | **17** | `/Library/Java/JavaVirtualMachines/jdk-17.jdk` (21 also present) |
+
+`jvmToolchain(17)` resolves against the locally installed JDK 17 — no foojay resolver or auto-provisioning needed. The JDK that launches Gradle (Homebrew 23) is deliberately *not* the JDK we compile against; that decoupling is the point of E6.
+
+Build-with Gradle 9.6.1 versus the supported *floor* (D9) remains a milestone-4 question — `core` has no Gradle API surface, so milestones 1–3 are unaffected.
