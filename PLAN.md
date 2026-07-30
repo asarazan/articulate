@@ -184,7 +184,9 @@ Parsing uses a standard StAX/DOM XML parser with DTD/external-entity resolution 
 
 **One claim did not survive re-testing** — the `state: "new"` rule, corrected in §2.6. It was the highest-consequence item in the spec, which is precisely why it was worth re-running.
 
-**Still single-sourced, not re-verified:** the AOSP line-number citations (the source doc notes `master` moves and calls them approximate anchors — the function names are the real citation), and the Java-side comparisons in §2.3 (`%g` trailing zeros, `HALF_UP` vs half-to-even rounding, locale-formatting divergence). The latter need a JDK 17 run plus a Swift/C comparison to close; none of them block M2's parser, but `%g` gates a hard-error rule so it should be confirmed before that error message ships.
+**The Java-side comparisons in §2.3 were also independently confirmed** (2026-07-30) by running JDK 17.0.10, `clang` C, and Swift on Xcode 26.6 head to head. Swift matches C and diverges from Java on every row where they differ: `%g` of `1.0` is `1.00000` in Java but `1` in both C and Swift, so the `%g` hard-error rule is empirically warranted rather than inferred; `HALF_UP` versus half-to-even reproduced on all four rounding cases; and the locale divergence reproduced, with Swift's `String(format:)` POSIX by default. **No rule in the merged spec is single-sourced any longer.**
+
+AOSP references are cited by **function name** rather than line number — line numbers against a moving branch decay by construction, and the reproducible experiment against a pinned tool is the real warrant. See `docs/CONVERSIONS.md` §0 and §13.
 
 ### D4 — inline markup & CDATA policy — DECIDED (2026-07-30)
 

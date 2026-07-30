@@ -1111,8 +1111,30 @@ Functions referenced: `StringBuilder::AppendText`, `StringBuilder::ResetTextStat
 | 2026-07-30 | Original research pass (`aapt2` 2.19, `xcstringstool` 26.6, AOSP source) | This document |
 | 2026-07-30 | Independent re-run of 11 Android-side rules, byte-checked with `xxd` | All reproduced |
 | 2026-07-30 | Independent re-run of 7 target-side rules | 6 reproduced; **`state: "new"` corrected** — the drop is conditional on `extractionState` being absent, not unconditional (see T1) |
+| 2026-07-30 | Independent three-way run of the Java-side claims (§8 P2/P3): JDK **17.0.10**, `clang` C, Swift on Xcode 26.6 | All reproduced exactly — see below |
 
-Still single-sourced, not independently re-run: the Java-side comparisons in §8
-(`%g` trailing zeros, `HALF_UP` vs half-to-even rounding, locale-formatting divergence). These need
-a JDK 17 run plus a Swift/C comparison. `%g` gates a hard-error rule, so close it before that error
-message ships.
+**No claim in this document is single-sourced any more.** The last outstanding item — the Java-side
+float comparisons — was closed by running all three languages head to head:
+
+| input | Java 17 | C | Swift |
+|---|---|---|---|
+| `%g` of `1.0` | `1.00000` | `1` | `1` |
+| `%g` of `100.0` | `100.000` | `100` | `100` |
+| `%g` of `1e-4` | `0.000100000` | `0.0001` | `0.0001` |
+| `%g` of `1e-5` | `1.00000e-05` | `1e-05` | `1e-05` |
+| `%g` of `1.5` | `1.50000` | `1.5` | `1.5` |
+| `%g` of `0.25` | `0.250000` | `0.25` | `0.25` |
+| `%g` of `123456789.0` | `1.23457e+08` | `1.23457e+08` | `1.23457e+08` |
+| `%.1f` of `0.25` | `0.3` | `0.2` | `0.2` |
+| `%.1f` of `0.35` | `0.4` | `0.3` | `0.3` |
+| `%.2f` of `1.005` | `1.01` | `1.00` | `1.00` |
+| `%.2f` of `0.125` | `0.13` | `0.12` | `0.12` |
+
+Swift matches C and diverges from Java on **every** row where they differ. Three confirmations:
+the `%g` trailing-zero divergence is real (the *threshold* agrees — note `123456789.0` matches
+across all three — only trailing zeros differ, exactly as P3 states); Java's `HALF_UP` versus
+C/Swift half-to-even is real on all four rounding cases; and the locale divergence is real —
+Java `Locale.GERMANY` `%.2f` of `1234.5` → `1234,50`, Swift's `String(format:)` with no locale →
+`1234.50` (POSIX), Swift with an explicit `de_DE` locale → `1.234,50`.
+
+The `%g` hard-error rule (P3) is therefore correct and now empirically warranted, not inferred.
