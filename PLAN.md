@@ -121,25 +121,50 @@ core/src/test/corpus/
 
 Android's resource compiler applies non-obvious lexing rules that we must replicate, because the source of truth is *Android-style* by settled decision:
 
+**Parsing is an ordered six-stage pipeline, not a set of independent rules.** This was the single biggest structural correction from research: several behaviors below are only explicable — and only implementable correctly — in this order. Implementing the table as independent passes in the wrong order produces wrong output on roughly a dozen cases.
+
+```
+S0  XML parse .............. entity refs resolved; CDATA delivered as ordinary text
+S1  Subtree flatten ........ no-namespace tags → style spans; xliff:g → untranslatable section
+S2  Edge trim ............... ONLY IF no span seen anywhere in the string
+S3  Android escape/quote/ws . backslash escapes; `"` toggles quoting; ASCII ws runs → ' '
+S4  Item-type reinterpret ... RAW (pre-S3) text tried as @ref / ?attr FIRST
+S5  Format verification ..... plain strings only, NOT styled
+```
+
+Three consequences fall directly out of the ordering: S2-before-S3 means a trailing `\` has its whitespace trimmed first and is *then* dropped as a dangling escape; S0-before-S3 means `&quot;`/`&apos;` are indistinguishable from literal `"`/`'` by the time Android's layer runs; S1-before-S2 means one `<b>` anywhere changes the whole string's edge whitespace.
+
 | Rule | Behavior to implement | Corpus case |
 |---|---|---|
-| Escapes | `\'`, `\"`, `\n`, `\t`, `\\`, `\uXXXX` unescaped to literal chars | `escapes-basic` |
-| Unescaped apostrophe | error in AAPT → error for us, same message shape | `error-bare-apostrophe` |
-| Quoted strings | `"  spaced  "` preserves interior whitespace and bare `'` | `quoted-whitespace` |
-| Whitespace collapse | unquoted runs of whitespace/newlines collapse to single space | `whitespace-collapse` |
-| Leading `@` / `?` | must be escaped in Android; unescape on parse | `escapes-at-question` |
-| XML entities | `&amp;` `&lt;` `&gt;` `&quot;` `&apos;` resolved by the XML parser | `xml-entities` |
-| CDATA | **not verbatim** (corrected — see D4): same escape/whitespace pipeline as normal text, only XML tag/entity interpretation is suppressed inside it | `cdata-not-verbatim`, `cdata-inert-markup`, `error-cdata-apostrophe` |
-| `<xliff:g>` placeholder annotation | unwrap transparently — drop the tag, keep inner text; lift `id`/`example` into the catalog `comment` (decided — D4) | `xliff-g-unwrap`, `xliff-g-whitespace` |
-| Inline styling markup (`<b>`, `<i>`, `<u>`, `<annotation>`, `<font>`, `<br/>`, arbitrary HTML) | **hard error by default** — no iOS equivalent, information provably cannot survive (decided — D4); `markupPolicy` DSL override ships in v0, non-default modes implemented later | `error-styled-nonpositional`, `span-double-space` |
-| `translatable="false"` | excluded from catalog entirely (and from Android copy? no — copied for Android, skipped for iOS) | `translatable-false` |
-| Duplicate key in one file | error | `error-duplicate-key` |
-| Key present in locale but not in default `values/` | error (orphan translation) | `error-orphan-key` |
-| Key legality | must be a valid Android resource name; validated even though source is hand-authored | `error-bad-key` |
+| Escapes | `\'` `\"` `\n` `\t` `\\` `\uXXXX` **plus `\#` `\@` `\?`**; unknown `\x` → backslash dropped, `x` emitted literally; trailing lone `\` silently dropped; `\uXXXX` must be exactly 4 hex digits else error | `escapes-basic`, `escapes-hash`, `escapes-unknown-passthrough`, `escapes-trailing-backslash`, `error-bad-unicode-escape` |
+| **`\r` is NOT a carriage return** | falls to the unknown-escape branch → literal `r`. Author writing `\r\n` gets `r`+newline. **We reject `\r`** rather than faithfully reproduce a bug | `escapes-carriage-return` |
+| Escape/trim ordering | escapes processed *after* edge trimming (S2→S3): `\q\z\ ` → `qz`, not `qz ` | `escapes-trim-order` |
+| Escapes inside quotes | quoting suppresses whitespace collapse and the apostrophe error, **not** backslash escapes | `quoted-with-escapes` |
+| Unescaped apostrophe | hard error (not warning), not downgradable by `--legacy`; no Lint rule exists. Mirror AAPT2's wording: `unescaped apostrophe in string` | `error-bare-apostrophe` |
+| Quoted strings | `"` is a **toggle**, not a delimiter pair; quote chars never emitted; no unbalanced-quote error in AAPT2 | `quoted-whitespace`, `quoted-mid-string` |
+| **Odd quote count** | a single stray `"` enables quoting for the entire rest of the string — preserving whitespace and legalizing every later bare `'`. Almost always an authoring bug: **we error** | `error-odd-quote-count` |
+| Quote state at spans | resets at every span boundary — a quoted region cannot span an inline tag | `quote-reset-at-span` |
+| Whitespace collapse | Android's own bespoke pass (not XML normalization, not `xml:space`), kept bug-for-bug from AAPT1: unquoted runs → exactly one U+0020 | `whitespace-collapse` |
+| **Whitespace collapse is ASCII-only** | gated on codepoint ≤ 0x7F. U+00A0/U+2003/U+2008 pass through uncollapsed. **The official Android docs are factually wrong here** — do not implement the documented behavior | `whitespace-unicode-spaces-preserved` |
+| Edge whitespace | trimmed — **but only if the string contains no span**. `  <b>x</b>  y  ` keeps a leading and trailing space; `<xliff:g>` does not suppress trimming | `whitespace-edges-with-span`, `whitespace-edges-with-xliff` |
+| XML entities | `&amp;` `&lt;` `&gt;` resolve and are inert. **`&quot;`/`&apos;` are NOT escape hatches**: resolved pre-S3, so `&quot;` toggles quoting and vanishes, `&apos;` hard-errors identically to a bare `'` | `xml-entities`, `error-apos-entity` |
+| Invalid XML char refs | `&#11;` `&#12;` rejected by the XML parser before Android sees them | `error-invalid-xml-char-ref` |
+| CDATA | **not verbatim** (corrected — D4): same escape/whitespace/quoting pipeline as normal text; only XML tag/entity interpretation is suppressed inside it. A bare `'` inside CDATA still errors | `cdata-not-verbatim`, `cdata-inert-markup`, `error-cdata-apostrophe` |
+| `<xliff:g>` placeholder annotation | unwrap transparently — drop tag, keep inner text; lift `id`/`example` into catalog `comment` (D4). Not a span: format verification still runs, whitespace collapses correctly, trimming still applies. Nested `<xliff:g>` is an error | `xliff-g-unwrap`, `xliff-g-whitespace`, `xliff-g-attrs-to-comment`, `error-nested-xliff-g` |
+| Inline styling markup (`<b>` `<i>` `<u>` `<annotation>` `<font>` `<br/>`, arbitrary HTML) | **hard error by default** (D4) — no iOS equivalent, information provably cannot survive; `markupPolicy` DSL override ships in v0 | `error-styled-nonpositional`, `span-double-space` |
+| Foreign-namespace tags | warn, drop tag, keep children | `foreign-namespace-warn` |
+| **Leading `@`/`?` is NOT an error in Android** | it silently becomes a *reference* (S4 runs on raw text). Failure surfaces at link time in a different tool, or never if the target exists. **We hard-error** — we cannot resolve Android references, and emitting literal `@string/other` into a catalog ships reference syntax to users. Only `@`/`?` are affected: `#FF0000`, `42`, `true` stay plain strings | `escapes-at-question`, `error-unescaped-leading-at`, `error-unescaped-leading-question`, `string-literal-lookalikes` |
+| `translatable="false"` | **emit with `"shouldTranslate": false`, do not drop** (decided 2026-07-30 — see below). Unparseable attribute value is an error | `translatable-false`, `error-bad-translatable-value`, `error-translation-for-untranslatable` |
+| **`formatted="false"`** | disables format verification for that string; `%` chars are literal. We must honor it — and since `.xcstrings` has no equivalent opt-out, every literal `%` must be **escaped to `%%`** on the way out. A real conversion, not a pass-through | `formatted-false-escapes-percent` |
+| `<string-array>` | **hard error at parse time** (decided 2026-07-30 — D6, see §8) | `error-string-array` |
+| Duplicate key in one file | hard error, not downgradable by `--legacy`; no last-write-wins. Keys on `(name, config)`, so same key across `values/` and `values-de/` is fine | `error-duplicate-key` |
+| Duplicate/invalid `<item quantity=>` | both hard errors. Legal keywords are exactly `zero one two few many other` | `error-duplicate-quantity`, `error-bad-quantity` |
+| Key present in locale but not in default `values/` | error (orphan translation) — matches Lint's `ExtraTranslation`, severity Fatal | `error-orphan-key` |
+| Key legality | grammar: `XID_Start\|_` then `(XID_Continue\|.\|-)*`. No leading digit, **no `$`** (unlike Java identifiers), `.`/`-` allowed, non-ASCII allowed, case-sensitive, no reserved words. **We are stricter**: warn on `.`/`-` and non-ASCII, since those break Swift symbol generation *and* `R.` access | `error-bad-key`, `key-dot-dash-warn`, `key-unicode`, `key-reserved-word-ok` |
 
 Parsing uses a standard StAX/DOM XML parser with DTD/external-entity resolution **disabled** (no XXE), position-aware for error messages.
 
-**This table is a summary; `docs/CONVERSIONS.md` is the authoritative, cited spec for milestone 2** — it corrects several other rows above too (whitespace collapse, XML entity handling, `%f`/`%g`/`%x`/`%o`, `translatable="false"`, key legality) and adds ~49 corpus cases this table doesn't list. Merging those corrections fully into this table is separate, still-pending work; only the D4-relevant rows are updated here because D4 is now ruled.
+**`docs/CONVERSIONS.md` remains the authoritative spec** — every rule above is stated there with its AOSP source citation, reproduced experiment, and confidence marker. This table is the working summary; consult that document before implementing any row.
 
 ### D4 — inline markup & CDATA policy — DECIDED (2026-07-30)
 
@@ -165,37 +190,65 @@ Mapping table, applied per string; conversion is total-or-error:
 
 | Android | iOS emission | Notes |
 |---|---|---|
-| `%s` / `%1$s` | `%@` / `%1$@` | object slot |
+| `%s` / `%1$s` | `%@` / `%1$@` | object slot; `%@` is the only object conversion |
 | `%d` / `%1$d` | `%lld` / `%1$lld` **(decided — D3)** | see below |
-| `%f`, `%.2f`, `%e`, `%g` | unchanged | C-compatible on both |
-| `%x`, `%o` | unchanged + width/precision flags preserved | |
+| `%f`, `%.Nf`, `%e`, `%E` | unchanged | **verified** identical across Java 17 / C / Swift, character for character |
+| `%g`, `%G` | **HARD ERROR** | **corrected** — not compatible. Java keeps trailing zeros (`1.0`→`1.00000`), C and Swift strip them (`1`). No faithful mechanical rewrite exists. Guidance: use `%.Nf` or `%e` |
+| `%x`, `%X`, `%o` | **`%llx`, `%llX`, `%llo`** | **corrected** — same 32-bit truncation D3 exists to fix. Apple's `%x`/`%o` are `unsigned int`; `String(format:"%x", Int(4294967296))` → `"0"`. Flags/width/precision preserved (`%#08x` → `%#08llx`) |
 | `%%` | `%%` | literal percent both sides |
-| `%b`, `%h`, `%c`, `%n`, `%,d` (grouping), `%(d`, `%tY` (date/time) | **hard error** with per-specifier guidance | Java-only semantics; silent mistranslation risk |
+| `%c`, `%C` | **HARD ERROR** | Java `%c` is a Unicode character; Foundation `%c` is an **8-bit `unsigned char`**. Not equivalent |
+| `%S` | **HARD ERROR** | Java `%S` is an uppercased string; Foundation `%S` is a **null-terminated UTF-16 array** — different meaning and memory-unsafe |
+| `%.Ns` (precision on a string) | **HARD ERROR** | Java/C truncate to N chars; `%@` does not honor precision, so the truncation would silently vanish. Width alone (`%10s`) also errors pending verification |
+| `%<` (argument reuse) | **HARD ERROR** | no iOS equivalent; AAPT2 rejects it too ("positions can be moved around during translation") |
+| `%a`, `%A` | **HARD ERROR** | C99 hex-float, unexercised, rare — error rather than guess |
+| `%b`, `%B`, `%h`, `%H`, `%n`, `%,d`, `%(d`, `%tX` | **HARD ERROR** with per-specifier guidance | Java-only semantics; silent mistranslation risk. For `%,d` point at iOS `NumberFormatter` / `formatted(.number)` |
 
 - **`%d` policy — DECIDED (D3, 2026-07-30): emit `%lld`, unconditionally, not configurable.**
   Android's `%d` (Java `Formatter`) accepts any integer width — `byte`/`int`/`long` — and the XML source cannot express which. C/`printf` formatting on iOS is strict: `%d` is exactly 32-bit `int`, while Swift's default `Int` is 64-bit on every Apple platform. Values ≥ 2³¹ therefore truncate silently: no crash, no warning, wrong number, in every locale at once — precisely the silent-shipped-bug class the brief forbids.
   `%lld` (`long long`, 64-bit on all Apple platforms) absorbs every Android integer width without loss, so it is correct for 100% of inputs; `%d` is correct only until a count gets large. There is no symmetric safe choice in the other direction.
   Accepted cost: generated catalogs read `%lld` where source reads `%d` — a visible, deliberate transformation. Rejected: per-project configurability (nothing here needs to vary per consumer; a knob only creates a way to get it wrong).
-  *Caveat carried forward:* the claim that Xcode's own Swift extraction emits `%lld` for `Int` is directional, not verified against a citation. The correctness argument above stands independently of it — this table is generated, not typed against Xcode's autocomplete. Worth confirming opportunistically when the Xcode fixture (§1.4) is produced.
-- **Positional discipline:** if a string has ≥2 specifiers, all must be explicitly positional (`%1$s %2$d`) or it's an error — translators reorder arguments, and unnumbered reordering silently corrupts on both platforms. Matches Android Lint's own rule. Corpus: `error-mixed-positional`.
-- Specifier parity across locales: every localization of a key must use the same multiset of specifiers as the default locale, else error (`error-specifier-mismatch-locale`). This is the single highest-value check in the whole tool — it's the shipped-translation crash class.
+  *Caveat now resolved (2026-07-30):* the original write-up flagged the "Xcode's own extraction emits `%lld`" claim as directional and unverified. Research confirmed the underlying behavior empirically and from Apple's own documentation — `%d` is documented as 32-bit `int`, and `String(format: "%d", Int(4294967296))` returns `"0"` on Xcode 26.6. Independently, `xcstringstool` derives a plural's `NSStringFormatValueTypeKey` straight from the specifier, so `%d` in a plural declares a 32-bit type against a 64-bit `Int` (see §2.4). The decision stands, now on verified rather than first-principles grounds.
+- **`%x`/`%o` follow D3's logic — DECIDED (2026-07-30): emit `%llx` / `%llX` / `%llo`.** Verified: Apple documents `%x`/`%X`/`%o` as *unsigned 32-bit*, and `String(format: "%x", Int(4294967296))` returns `"0"` — the identical truncation D3 was created to eliminate for `%d`. Since `strings.xml` cannot encode the argument's Java type and Swift's `Int` is unconditionally 64-bit, the `ll` modifier is the only choice that never truncates. Flags, width and precision are preserved (`%#08x` → `%#08llx`; `#` alternate-form behavior confirmed identical between Java and C). Residual, documented not fixed: for a negative value Android passed as an `Integer`, Android renders 8 hex digits and iOS 16 — unavoidable without type information, and negative hex in user-facing translated copy is not a realistic case.
+- **Positional discipline:** if a string has ≥2 specifiers, all must be explicitly positional (`%1$s %2$d`) or it's an error — translators reorder arguments, and unnumbered reordering silently corrupts on both platforms. **Confirmed this matches AAPT2's own default** (hard error, downgradable only via `--legacy`). Corpus: `error-nonpositional-multi`, `error-arg-reuse`.
+- **We cannot inherit AAPT2's positional check — it has two verified holes**, and both are corpus cases: (a) **styled strings skip verification entirely**, so `%s and %d` errors but `%s and <b>%d</b>` compiles clean; (b) **a `Time`-format look-alike short-circuits the scan** — any conversion char in `D F K M W Z k m w y z` makes the verifier return success immediately, so `%y and %s and %d` (three non-positional args) compiles clean. Articulate must run its own check on **every** string, styled or not. Corpus: `error-styled-nonpositional`, `error-time-format-shortcircuit`.
+- Specifier parity across locales: every localization of a key must use the same multiset of specifiers as the default locale, else error. **Research materially strengthened this:** `xcstringstool` performs essentially *no* validation — arity mismatches, positional type swaps, a literal `%s`, and even empty keys all compile clean. Every one is a runtime crash or garbage render. **Articulate is the only validation layer that exists**; this is the strongest available evidence for the project's own thesis and belongs in the README. Corpus: `error-locale-arity-mismatch`, `error-locale-type-mismatch`.
 - The brief's note stands: `%d` vs `%s` *typing* must be authored correctly in source; we validate consistency, we don't infer intent. Documented in README.
+- **Two platform divergences we document rather than fix.** (a) *Rounding*: Java specifies `HALF_UP`, C/Foundation use IEEE-754 half-to-even — `%.1f` of `0.25` is `0.3` on Android and `0.2` on iOS. (b) *Locale sensitivity*, which matters for an i18n tool: Java's `%f`/`%e`/`%d` localize via the formatter's locale, while Foundation's `String(format:)` without an explicit locale is POSIX — so `%.2f` of `1234.5` renders `1234,50` on a German Android device and `1234.50` on iOS. Neither is expressible in the catalog format nor fixable by the converter. Note both in generated-file headers and the README; consider a lint in a later milestone. Corpus: `float-passthrough`, `float-rounding-divergence-doc` (documentation-only).
 
 ### 2.4 Plurals
 
 Android `<plurals>` → xcstrings `variations.plural`:
 
-- Quantities `zero|one|two|few|many|other` map 1:1 to CLDR categories in `variations.plural.<category>.stringUnit`.
-- `other` required in every locale that defines the plural (error otherwise) — both platforms fall back to it.
+- Quantities `zero|one|two|few|many|other` map 1:1 to CLDR categories in `variations.plural.<category>.stringUnit`. **Verified as a pure identity mapping** — Xcode accepts exactly Android's keyword set.
+- **Legal Android plurals can produce an `.xcstrings` that will not build — this is the highest-value rule in this section.** `xcstringstool` emits exactly one hard error in all testing, and it is this: *"Plural variation requires referencing the number in the string."* So this perfectly valid `strings.xml`:
+  ```xml
+  <plurals name="items">
+    <item quantity="one">One item</item>
+    <item quantity="other">Several items</item>
+  </plurals>
+  ```
+  converts to a catalog that **breaks the user's Xcode build**. Articulate must detect it at conversion time and fail with the actionable message (split into two top-level strings), rather than emitting a file that fails later inside a generated artifact the user didn't write. Precise rule: at least one variant must contain a **numeric** specifier — `%@` does not satisfy it. Scope: the check runs against the **source language** when it has a plural for that key, falling through to each present locale when it does not; translations are exempt once the source conforms. Corpus: `error-plural-no-number-reference`, `plural-number-in-one-variant-only`.
+- `other` required in every locale that defines the plural (error otherwise) — both platforms fall back to it. **Xcode does not enforce this** (a plural with only `one` compiles fine), so it is ours to enforce; Android's own docs instruct authors to always supply `one` and `other`.
 - Quantities are passed through per-locale exactly as authored; we do not second-guess CLDR applicability per language (Android ignores non-applicable categories at runtime; iOS likewise).
-- Placeholder rules of §2.3 apply inside each quantity string; the count specifier follows the D3 ruling.
-- Corpus: `plurals-basic`, `plurals-all-quantities`, `plurals-multi-locale`, `error-plural-missing-other`, `error-plural-specifier-mismatch`.
+- Placeholder rules of §2.3 apply inside each quantity string; the count specifier follows the D3 ruling. **D3 is load-bearing here, independently confirmed:** `xcstringstool` derives `NSStringFormatValueTypeKey` directly from the specifier, so `%d` produces a `.stringsdict` declaring a 32-bit type that then reads 32 bits off a 64-bit Swift `Int` at runtime. With multiple arguments it also computes the count's argument index into the format key, which **requires positional arguments** — a further independent justification for the positional-discipline rule.
+- Corpus: `plurals-basic`, `plural-all-categories`, `plurals-multi-locale`, `error-plural-missing-other`, `error-plural-specifier-mismatch`, `plural-lld-value-type`, `error-duplicate-quantity`, `error-bad-quantity`.
 
 ### 2.5 Comments
 
 Settled: `comment` field populated from XML comments. Rule: an XML comment immediately preceding a `<string>`/`<plurals>` element in the **default locale** becomes that entry's `comment`; comments in translation files are ignored (source language owns metadata). Corpus: `comments-basic`, `comments-multiline`. *(See §9 flag F1 — the hub lists comment passthrough as a possible v0.x item, but the brief settles it; brief wins here.)*
 
-**Exit criteria:** corpus ≥ 40 cases green including all error cases; a `CONVERSIONS.md` reference doc generated or hand-kept 1:1 with the corpus.
+### 2.6 Target-format rules (`.xcstrings` side)
+
+Rules with no Android-side counterpart, verified against `xcstringstool` from Xcode 26.6:
+
+- **Never emit `"state": "new"`.** Verified: of every state value tested — `translated`, `needs_review`, `stale`, a made-up `reviewed`, outright garbage — **only `new` causes the string to be silently dropped from the build**, with no diagnostic anywhere. A converted string is by definition a supplied translation, so we always emit `translated` (already a `CanonicalFormat` constant from milestone 1, which this retroactively validates as load-bearing rather than merely tidy). Mandatory corpus assertion: `xcstrings-state-translated`.
+- **`shouldTranslate: false`** is the native equivalent of Android's `translatable="false"` — verified one-for-one: the entry compiles normally and its value *is* emitted into the built `.strings`, i.e. excluded from translation, not from the build. See the D-ruling below.
+- **Escaping is plain JSON escaping.** No quoting convention, no apostrophe rule, no whitespace collapsing; leading/trailing spaces, newlines and tabs round-trip verbatim. **The conversion is therefore lossless on the escaping axis** — every value Android's pipeline can produce is representable. Our escaping job is exactly: undo Android's layer, then JSON-encode. Corpus: `xcstrings-json-escaping`.
+- **`.xcstrings` imposes no key constraints at all** — empty keys, `a.b-c`, `class`, keys with spaces all compile. All key validation is Android-side plus symbol-generation-side (see the key-legality row in §2.2).
+
+**`translatable="false"` — DECIDED (2026-07-30): emit with `"shouldTranslate": false`, do not drop.** The original plan excluded such strings from the catalog entirely. Research found `.xcstrings` has a native equivalent whose semantics match Android's exactly — in both systems the string ships in the build and is merely withheld from translation tooling. Dropping it instead would break key parity between platforms for no reason, silently remove a string the iOS app may legitimately reference, and discard information the target format can represent natively. Also ruled: supplying a translation for a key marked non-translatable is an error (no definitive Lint precedent found, but it is unambiguously an authoring mistake and erroring costs nothing).
+
+**Exit criteria:** corpus ≥ 65 cases green including all error cases (raised from ~40 — research added ~49 new cases; see `docs/CONVERSIONS.md` §12 for the full index); `docs/CONVERSIONS.md` kept 1:1 with the corpus as the cited spec of record.
 
 ---
 
@@ -306,8 +359,10 @@ Exhaustive table test over every row above + property test: output always matche
 
 ## 8. Hub Open Questions — recommendations (human rules on each)
 
-### D6. `<string-array>` policy
-**Recommend: reject at parse time in v0** with an error that names the array and suggests the manual pattern (`foo_0`, `foo_1`, … as plain strings). Rationale: iOS has no array resource; auto-emitting indexed keys invents a convention consumers can't predict, and ordering/size changes become silent translation bugs — exactly the 95%-right trap the brief forbids. Rejection is cheap and fully reversible; indexed emission can arrive as an opt-in in v0.x if demand shows up.
+### D6. `<string-array>` policy — DECIDED (2026-07-30)
+**Reject at parse time in v0**, with an error that names the array and suggests the manual pattern (`foo_0`, `foo_1`, … as plain strings). Rationale: iOS has no array resource; auto-emitting indexed keys invents a convention consumers can't predict, and ordering/size changes become silent translation bugs — exactly the 95%-right trap the brief forbids. Rejection is cheap and fully reversible; indexed emission can arrive as an opt-in in v0.x if demand shows up.
+
+Research adds one supporting argument: AAPT2's `ParseArrayImpl` accepts a general type mask, so array items may be references or non-string items. Auto-indexing would therefore have to invent **both** a key convention *and* a type policy — two guesses, not one. Corpus: `error-string-array`.
 
 ### D7. v0 scope
 **Recommend: v0 = milestones 1–5** — strings + plurals + comments + locale mapping + `generateStrings` + `verifyStrings` + the `commonMain` keys object. The drift gate (m5) belongs in v0 because determinism-without-enforcement is half the pitch. **Swift key-parity lint (m6) = v0.1** — it's the best marketing feature but needs heuristics that shouldn't gate the core release. String-arrays rejected (D6), inline HTML per D4.
@@ -381,14 +436,16 @@ Blocking first; later items can wait until their milestone starts.
 - ✅ **D3 — Integer specifier mapping** (§2.3): **`%d → %lld`**, unconditional, not configurable. *Decided 2026-07-30.*
 - ✅ **D12 — Toolchain** (§E6): **committed Gradle wrapper + toolchain-pinned JDK**; bootstrap is a one-time human step. *Decided 2026-07-30.*
 - ✅ **D4 — Inline markup & CDATA policy** (§2.2): CDATA supported (corrected — was never actually a policy question); `<xliff:g>` unwrapped transparently (not optional — real-world necessity); genuine styling markup hard-errors by default, with a three-way `markupPolicy = ERROR | STRIP | VERBATIM` DSL escape hatch shipped in v0 (`STRIP`/`VERBATIM` implementations deferred). Full ruling in §2.2. *Decided 2026-07-30.*
+- ✅ **D6 — `<string-array>` policy** (§8): **reject at parse time in v0**, error names the array and suggests `foo_0`/`foo_1` plain strings. *Decided 2026-07-30.*
+- ✅ **D3a — `%x`/`%o` mapping** (§2.3): **`%llx` / `%llX` / `%llo`**, extending D3's reasoning to hex/octal on verified evidence of the same 32-bit truncation. *Decided 2026-07-30.*
+- ✅ **`translatable="false"` handling** (§2.6): **emit with `"shouldTranslate": false`**, do not drop — `.xcstrings` has a native equivalent with matching semantics. *Decided 2026-07-30.*
 
-**Unblocked by the above:** repo scaffolding and all of milestone 1 (as before), plus milestone 2's non-markup corpus work can now proceed all the way through markup/CDATA/xliff:g cases once parser work starts.
+**Milestone 2 is fully unblocked.** Every decision M2's corpus and parser depend on is now ruled; §2.2–§2.6 carry the merged, research-corrected rules, with `docs/CONVERSIONS.md` as the cited spec of record.
 
 ### Still open
 
-5. **D5 — Locale edge policy** (§3.1): (a) `zh-rCN→zh-Hans` canonicalization default with `localeOverrides` escape hatch (recommended) vs literal pass-through; (b) non-locale qualifiers in `:i18n` are a hard error (recommended) vs ignored. *Blocks m3.*
-6. **D6 — `<string-array>`** (§8): reject in v0 (recommended). *Hub open question; blocks m2 error corpus.*
-7. **D7 — v0 scope** (§8): milestones 1–5 in v0, Swift lint as v0.1 (recommended). *Hub open question; shapes everything after m3.*
+5. **D5 — Locale edge policy** (§3.1): (a) `zh-rCN→zh-Hans` canonicalization default with `localeOverrides` escape hatch (recommended) vs literal pass-through; (b) non-locale qualifiers in `:i18n` are a hard error (recommended) vs ignored. *Blocks m3.* **Research strengthened (b) considerably:** `values-de` and `values-de-night` would both map to `de` — a silent key collision resolved by read order, i.e. data loss rather than mere divergence.
+7. **D7 — v0 scope** (§8): milestones 1–5 in v0, Swift lint as v0.1 (recommended). *Hub open question; shapes everything after m3.* **Two research flags:** the m2 corpus grew ~40 → ~65 cases (real added work in the milestone the plan already calls the gate); and m6 should be re-specced to drive off `xcstringstool generate-symbols` output rather than the currently-planned regex scanner — exact instead of heuristic. Timing still correct, design needs revisiting before anyone writes that regex.
 8. **D8 — SwiftPM story** (§8): documented workaround, no v0 code (recommended). *Hub open question; docs-only, can be ruled anytime before release.*
 9. **D9 — Gradle/AGP floor** (§E2): Gradle 8.5 + AGP 8.1 floor with 3-cell matrix (recommended). *Needed by m4.*
 10. **D10 — Plugin ID / DSL shape** (§E4): two plugin IDs (recommended) vs one. *Needed by m4.*
