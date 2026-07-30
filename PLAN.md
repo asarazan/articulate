@@ -1,6 +1,6 @@
 # Articulate — Implementation Plan
 
-**Coordinates:** `ltd.stencil.articulate` · **Date:** 2026-07-30 · **Status:** pre-implementation, pending decisions listed at the end.
+**Coordinates:** `net.sarazan.articulate` · **Date:** 2026-07-30 · **Status:** pre-implementation, pending decisions listed at the end.
 
 Derived from the Decision Brief — Agent Constraints (Notion, read in full 2026-07-30). All *Settled Decisions* from the brief are treated as hard constraints and are not re-derived here. Constraint concerns are flagged in §9, not acted on.
 
@@ -244,7 +244,7 @@ Exhaustive table test over every row above + property test: output always matche
 - Alternative: skip TestKit, rely on sample only — faster to write, but up-to-date/config-cache regressions become invisible until integration.
 
 ### E4. Consumer DSL shape
-- **(a) Two plugin IDs** — `ltd.stencil.articulate` (on `:i18n`: source + generation + verify) and `ltd.stencil.articulate.android` (on the app module: variant res wiring). Explicit, each module's role visible. Recommended.
+- **(a) Two plugin IDs** — `net.sarazan.articulate` (on `:i18n`: source + generation + verify) and `net.sarazan.articulate.android` (on the app module: variant res wiring). Explicit, each module's role visible. Recommended.
 - **(b) One plugin ID, behavior keyed on what's applied alongside** — fewer IDs, magic detection; harder to document and to fail clearly when misapplied.
 - Extension sketch (either way):
   ```kotlin
@@ -257,7 +257,7 @@ Exhaustive table test over every row above + property test: output always matche
   ```
 
 ### E5. Publishing
-- **(a) Gradle Plugin Portal** (recommended for v0) — canonical discovery for `id("ltd.stencil.articulate")`; requires portal account + `ltd.stencil` namespace claim. Do the portal-collision check from the hub checklist before naming ships.
+- **(a) Gradle Plugin Portal** (recommended for v0) — canonical discovery for `id("net.sarazan.articulate")`; requires portal account + `net.sarazan` namespace claim. Do the portal-collision check from the hub checklist before naming ships.
 - **(b) Maven Central (+ marker POMs)** — more infra (Sonatype, signing) but org-controlled; can add later.
 - **(c) Both** — eventual end state; not needed for v0.
 
@@ -300,7 +300,7 @@ articulate/
 ├── core/                            # pure Kotlin, no Gradle API
 │   ├── build.gradle.kts
 │   └── src/
-│       ├── main/kotlin/ltd/stencil/articulate/core/
+│       ├── main/kotlin/net/sarazan/articulate/core/
 │       │   ├── model/               # StringCatalog, Entry, PluralCategory…
 │       │   ├── parse/               # Android strings.xml parser (XXE-safe, position-aware)
 │       │   ├── convert/             # placeholder & escape conversion
@@ -313,7 +313,7 @@ articulate/
 ├── plugin/                          # milestones 4–6
 │   ├── build.gradle.kts             # java-gradle-plugin, plugin IDs per E4 ruling
 │   └── src/
-│       ├── main/kotlin/ltd/stencil/articulate/gradle/
+│       ├── main/kotlin/net/sarazan/articulate/gradle/
 │       │   ├── ArticulatePlugin.kt / ArticulateAndroidPlugin.kt
 │       │   ├── ArticulateExtension.kt
 │       │   └── tasks/               # GenerateStringsTask, VerifyStringsTask, (SwiftKeyLintTask)
