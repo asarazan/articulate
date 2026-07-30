@@ -7,8 +7,9 @@ build/
 *.iml
 local.properties
 
-# Agent / editor scratch
-.claude/
+# Agent / editor scratch — but agent definitions are project config and versioned
+.claude/*
+!.claude/agents/
 
 # macOS
 .DS_Store
