@@ -395,12 +395,29 @@ Generating a Gradle wrapper requires an existing Gradle — chicken-and-egg. Thi
 |---|---|---|
 | Gradle (wrapper) | **9.5.0** | KGP 2.4.10's maximum *fully supported* Gradle. See note below. |
 | Kotlin / KGP | **2.4.10** | current stable, [kotlinlang.org/docs/releases](https://kotlinlang.org/docs/releases.html) |
-| JDK — launcher, daemon, toolchain | **17** | all three deliberately aligned; `/Library/Java/JavaVirtualMachines/jdk-17.jdk` |
+| JDK — daemon + compile toolchain | **17** | pinned in-repo; matches AGP 8.x's requirement |
+| JDK — launcher | **any 17+** | developer's `JAVA_HOME`; deliberately *not* pinned — see below |
 | foojay-resolver-convention | **1.0.0** | required for daemon-JVM auto-provisioning |
 
 **Why Gradle 9.5.0 and not 9.6.1.** The system Gradle that bootstrapped the wrapper was 9.6.1, but KGP 2.4.10 lists Gradle **7.6.3 – 9.5.0** as its fully-supported range ([Kotlin: Configure a Gradle project](https://kotlinlang.org/docs/gradle-configure-project.html)); past that ceiling Kotlin warns of deprecation warnings and features that may not behave as expected. Milestone 1 would likely have been fine, but milestone 4 is configuration-cache-sensitive plugin work with TestKit — exactly where an untested pairing costs the most to debug. Downgrading was free; we gain nothing from 9.6.1.
 
-**JDK alignment.** Launcher, daemon, and compile toolchain are all JDK 17 — one JVM, one daemon, no version straddling, and it matches AGP 8.x's stated requirement. The launcher JDK comes from `JAVA_HOME` in the developer's shell (unavoidably environmental — the `gradlew` script needs a JVM before any Gradle logic runs). The daemon JDK is pinned in-repo by `gradle/gradle-daemon-jvm.properties`. The compile JDK is pinned by the Java toolchain in build scripts.
+**JDK slots — pin two, leave one free.** There are three, and only two belong to the repo:
+
+| Slot | Pinned by | Value |
+|---|---|---|
+| Compile JDK | Java toolchain in build scripts | 17 |
+| Daemon JDK | `gradle/gradle-daemon-jvm.properties` (committed) | 17 |
+| Launcher JDK | developer's `JAVA_HOME` / `java` on `PATH` | any 17+ |
+
+The launcher is unavoidably environmental — `gradlew` is a shell script that needs a JVM before any Gradle logic runs, so no in-repo file can pin it. That is fine, because it has no influence on build output: the daemon and compile JDKs are both pinned independently, so the build is byte-identical whether the developer launches on 17, 21, or later.
+
+**Contributors should therefore point `JAVA_HOME` at their newest supported JDK, not at 17.** A machine-wide `JAVA_HOME` is inherited by every Java tool on the system; setting the global default to the *oldest* JDK a project needs is backwards. Projects pin downward — which is exactly what this repo does. Better still, scope `JAVA_HOME` per-project with a version manager (mise, SDKMAN) rather than setting it globally at all.
+
+*(Superseded: an earlier revision of this plan argued for aligning all three slots on 17. That was optimizing for a simplicity the committed daemon criteria already provides, and it pushed a stale JDK onto the whole machine as a side effect.)*
+
+**Daemon convergence, for free.** Google's guidance is to match `JAVA_HOME` with Android Studio's *Gradle JDK* setting so the two don't spawn separate daemons ([Android: Java versions in Android builds](https://developer.android.com/build/jdks)). The committed daemon criteria makes CLI and Studio converge on the same daemon JVM regardless of either setting — a more robust fix than matching by hand.
+
+**JDK distribution — prefer Temurin or Corretto over Oracle builds.** Oracle JDK 17's free NFTC updates ended at **17.0.12 (July 2024)**; later 17.x releases fall under the OTN license and require a paid subscription for production use, with Oracle JDK 21 on the same one-year-past-next-LTS clock. Eclipse Temurin and Amazon Corretto are GPLv2-with-Classpath-Exception, free for commercial use, and continue receiving security updates — the sane default for both contributors and CI.
 
 **Daemon JVM criteria.** `gradle/gradle-daemon-jvm.properties` is committed (generated via `./gradlew updateDaemonJvm --jvm-version=17`) so every contributor and CI runner gets an identical daemon JVM, auto-downloading one if absent. This requires the foojay resolver in `settings.gradle.kts` — without it the task fails with "Toolchain download repositories have not been configured." Note the generated URLs are opaque foojay redirect IDs pinning specific builds; good for reproducibility, but they are a external dependency that could rot, so treat regeneration as a routine maintenance action rather than a one-time event.
 
