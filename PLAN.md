@@ -124,15 +124,27 @@ Android's resource compiler applies non-obvious lexing rules that we must replic
 **Parsing is an ordered six-stage pipeline, not a set of independent rules.** This was the single biggest structural correction from research: several behaviors below are only explicable — and only implementable correctly — in this order. Implementing the table as independent passes in the wrong order produces wrong output on roughly a dozen cases.
 
 ```
-S0  XML parse .............. entity refs resolved; CDATA delivered as ordinary text
-S1  Subtree flatten ........ no-namespace tags → style spans; xliff:g → untranslatable section
-S2  Edge trim ............... ONLY IF no span seen anywhere in the string
-S3  Android escape/quote/ws . backslash escapes; `"` toggles quoting; ASCII ws runs → ' '
-S4  Item-type reinterpret ... RAW (pre-S3) text tried as @ref / ?attr FIRST
-S5  Format verification ..... plain strings only, NOT styled
+S0  XML parse ............... entity refs resolved; CDATA delivered as ordinary text
+S1  Subtree flatten ......... no-namespace tags → style spans
+                              xliff:g → untranslatable section (NOT a span)
+S2  Edge trim ............... ONLY IF no span was seen anywhere in the string
+    ├─ S3a  Reference probe . the RAW, still-escaped text is tried as @ref / ?attr.
+    │                         If it parses, the resource IS a reference and string
+    │                         processing never runs at all.
+    └─ S3b  String build .... otherwise: backslash escapes; `"` toggles quoting;
+                              runs of ASCII whitespace → one space
+S4  Format verification ..... plain strings only, NOT styled
 ```
 
-Three consequences fall directly out of the ordering: S2-before-S3 means a trailing `\` has its whitespace trimmed first and is *then* dropped as a dangling escape; S0-before-S3 means `&quot;`/`&apos;` are indistinguishable from literal `"`/`'` by the time Android's layer runs; S1-before-S2 means one `<b>` anywhere changes the whole string's edge whitespace.
+**S3a and S3b are a branch, not a sequence** — this is easy to get wrong and produces a subtle bug if you do. The reference probe runs on the *raw, still-escaped* value, and only if it fails does string building happen. Implement it sequentially (escape first, then probe) and `\@string/target` breaks: it would probe the already-unescaped `@string/target`, match it as a reference, and silently alias instead of producing the literal text `@string/target`. Verified: `\@string/target` → the literal string `@string/target`.
+
+Three consequences fall directly out of the ordering, **each independently reproduced against aapt2 2.19 on 2026-07-30**:
+
+| Consequence | Test | Result |
+|---|---|---|
+| S2 before S3b — trailing `\` has whitespace trimmed first, is *then* dropped as a dangling escape | `\q\z\ ` | `qz` (not `qz `) |
+| S0 before S3b — `&quot;`/`&apos;` are indistinguishable from literal `"`/`'` by the time Android's layer runs | `&amp; &lt; &gt; &quot; &apos;` | `& < >  '` — two spaces, no quote: `&quot;` toggled quoting on and vanished, which then made the space literal and the apostrophe legal |
+| S1 before S2 — one `<b>` anywhere suppresses trimming for the *whole* string | `··<b>x</b>··y··` | `·x y·` (edges retained); the same string with `<xliff:g>` instead trims to `A B` |
 
 | Rule | Behavior to implement | Corpus case |
 |---|---|---|
@@ -165,6 +177,10 @@ Three consequences fall directly out of the ordering: S2-before-S3 means a trail
 Parsing uses a standard StAX/DOM XML parser with DTD/external-entity resolution **disabled** (no XXE), position-aware for error messages.
 
 **`docs/CONVERSIONS.md` remains the authoritative spec** — every rule above is stated there with its AOSP source citation, reproduced experiment, and confidence marker. This table is the working summary; consult that document before implementing any row.
+
+**Verification status of the Android-side rules (2026-07-30).** The rules above came from a research agent; a second pass then *independently re-ran* a subset against the same aapt2 2.19 binary, without reusing the agent's outputs. Reproduced exactly, byte-checked where relevant: ASCII-only whitespace collapse (`x&#32;&#8200;&#8195;y` → `78 20 e2 80 88 e2 80 83 79`, i.e. U+2008/U+2003 preserved uncollapsed — Google's docs really are wrong); `&#160;` pairs preserved; TAB/LF/CR collapsing to one space; `\r` → literal `r`; `\#\@\?` → `#@?`; trailing lone `\` dropped; trim-before-escape ordering; the entity trace above; `<b>` edge-retention vs `<xliff:g>` trimming; span double-space; quote-reset-at-span; escaped-`@` yielding literal text.
+
+**Not independently re-verified, and flagged as such:** the AOSP line-number citations (the source doc notes `master` moves and calls them approximate anchors — the function names are the real citation); every `.xcstrings`/`xcstringstool` claim in §2.6 and the plural numeric-specifier rule in §2.4; and the Java-side comparisons in §2.3 (`%g` trailing zeros, rounding mode, locale formatting). Those remain single-sourced. Re-running the `xcstringstool` experiments is cheap — Xcode 26.6 build 17F113 is on this machine and matches the research environment exactly — and is worth doing before implementing §2.6, since the `state: "new"` silent-deletion claim is the highest-consequence unverified item in the whole spec.
 
 ### D4 — inline markup & CDATA policy — DECIDED (2026-07-30)
 
