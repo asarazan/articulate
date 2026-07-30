@@ -144,13 +144,17 @@ Mapping table, applied per string; conversion is total-or-error:
 | Android | iOS emission | Notes |
 |---|---|---|
 | `%s` / `%1$s` | `%@` / `%1$@` | object slot |
-| `%d` / `%1$d` | `%lld` / `%1$lld` **(proposed — Decision D3)** | see below |
+| `%d` / `%1$d` | `%lld` / `%1$lld` **(decided — D3)** | see below |
 | `%f`, `%.2f`, `%e`, `%g` | unchanged | C-compatible on both |
 | `%x`, `%o` | unchanged + width/precision flags preserved | |
 | `%%` | `%%` | literal percent both sides |
 | `%b`, `%h`, `%c`, `%n`, `%,d` (grouping), `%(d`, `%tY` (date/time) | **hard error** with per-specifier guidance | Java-only semantics; silent mistranslation risk |
 
-- **`%d` policy (D3):** Android `%d` formats int/long. On iOS, `%d` is C `int` (32-bit); Xcode's own Swift extraction emits `%lld` for `Int`. Proposal: emit `%lld` so generated symbols take 64-bit `Int` and large values can't truncate. Cost: catalog diffs read `%lld` where source reads `%d`. Alternative (pass `%d` through) is simpler but wrong for values > 2³¹ on iOS. Needs a ruling; corpus encodes whichever is chosen.
+- **`%d` policy — DECIDED (D3, 2026-07-30): emit `%lld`, unconditionally, not configurable.**
+  Android's `%d` (Java `Formatter`) accepts any integer width — `byte`/`int`/`long` — and the XML source cannot express which. C/`printf` formatting on iOS is strict: `%d` is exactly 32-bit `int`, while Swift's default `Int` is 64-bit on every Apple platform. Values ≥ 2³¹ therefore truncate silently: no crash, no warning, wrong number, in every locale at once — precisely the silent-shipped-bug class the brief forbids.
+  `%lld` (`long long`, 64-bit on all Apple platforms) absorbs every Android integer width without loss, so it is correct for 100% of inputs; `%d` is correct only until a count gets large. There is no symmetric safe choice in the other direction.
+  Accepted cost: generated catalogs read `%lld` where source reads `%d` — a visible, deliberate transformation. Rejected: per-project configurability (nothing here needs to vary per consumer; a knob only creates a way to get it wrong).
+  *Caveat carried forward:* the claim that Xcode's own Swift extraction emits `%lld` for `Int` is directional, not verified against a citation. The correctness argument above stands independently of it — this table is generated, not typed against Xcode's autocomplete. Worth confirming opportunistically when the Xcode fixture (§1.4) is produced.
 - **Positional discipline:** if a string has ≥2 specifiers, all must be explicitly positional (`%1$s %2$d`) or it's an error — translators reorder arguments, and unnumbered reordering silently corrupts on both platforms. Matches Android Lint's own rule. Corpus: `error-mixed-positional`.
 - Specifier parity across locales: every localization of a key must use the same multiset of specifiers as the default locale, else error (`error-specifier-mismatch-locale`). This is the single highest-value check in the whole tool — it's the shipped-translation crash class.
 - The brief's note stands: `%d` vs `%s` *typing* must be authored correctly in source; we validate consistency, we don't infer intent. Documented in README.
@@ -231,17 +235,20 @@ Exhaustive table test over every row above + property test: output always matche
 ## 7. Engineering choices the brief doesn't settle — options + trade-offs (no silent decisions)
 
 ### E1. Repo layout
-- **(a) Multi-module: `core` + `plugin` (+ `sample/`)** — recommended. Fast unit tests for the hard logic; plugin stays thin; `core` reusable by a future CLI. Slightly more build scaffolding.
-- **(b) Single plugin module** — simplest possible; but every corpus run pays Gradle API classpath, and logic/wiring blur together.
-- Either way: Kotlin DSL, version catalog, included-build `sample/` app (Android app + `:i18n` + a fake `ios/` tree) as living integration test.
+**DECIDED 2026-07-30: (a) multi-module.**
+- **(a) Multi-module: `core` + `plugin` (+ `sample/`)** — chosen. Fast unit tests for the hard logic; plugin stays thin; `core` reusable by a future CLI. Slightly more build scaffolding.
+- **(b) Single plugin module** — rejected: every corpus run pays Gradle API classpath, and logic/wiring blur together.
+- Kotlin DSL, version catalog, included-build `sample/` app (Android app + `:i18n` + a fake `ios/` tree) as living integration test.
 
 ### E2. Supported Gradle/AGP range
 - Floor candidates: **Gradle 8.5 + AGP 8.1** (variant API + `addGeneratedSourceDirectory` mature, config cache stable) — recommended floor; CI matrix {floor, current stable, AGP 9 beta} per the brief's AGP-9 warning.
 - Alternative: latest-only (Gradle 9/AGP 9) — smaller matrix, excludes most real apps for a v0 aimed at adoption.
 
 ### E3. Test strategy
-- Three tiers (recommended): (1) `core` unit + corpus (milestones 1–3, no Gradle), (2) TestKit functional tests (tasks, config cache, up-to-dateness), (3) `sample/` composite build in CI as the end-to-end smoke.
-- Alternative: skip TestKit, rely on sample only — faster to write, but up-to-date/config-cache regressions become invisible until integration.
+**DECIDED 2026-07-30: three tiers.**
+- Chosen: (1) `core` unit + corpus (milestones 1–3, no Gradle), (2) TestKit functional tests (tasks, config cache, up-to-dateness), (3) `sample/` composite build in CI as the end-to-end smoke.
+- Rejected: sample-only — faster to write, but up-to-date/config-cache regressions become invisible until integration.
+- Note: only tier 1 exists during milestones 1–3. Tiers 2–3 arrive with milestone 4.
 
 ### E4. Consumer DSL shape
 - **(a) Two plugin IDs** — `net.sarazan.articulate` (on `:i18n`: source + generation + verify) and `net.sarazan.articulate.android` (on the app module: variant res wiring). Explicit, each module's role visible. Recommended.
@@ -260,6 +267,18 @@ Exhaustive table test over every row above + property test: output always matche
 - **(a) Gradle Plugin Portal** (recommended for v0) — canonical discovery for `id("net.sarazan.articulate")`; requires portal account + `net.sarazan` namespace claim. Do the portal-collision check from the hub checklist before naming ships.
 - **(b) Maven Central (+ marker POMs)** — more infra (Sonatype, signing) but org-controlled; can add later.
 - **(c) Both** — eventual end state; not needed for v0.
+
+### E6. Toolchain & bootstrap
+**DECIDED 2026-07-30: Gradle wrapper, committed; toolchain-pinned JDK.**
+
+- **Wrapper is the only entry point.** `gradlew` / `gradlew.bat` / `gradle/wrapper/` committed to the repo. Local dev, CI, and agents all invoke `./gradlew` — never a system `gradle`. This removes "which Gradle is on `PATH`" and "which JDK is linked" as failure modes permanently. (Committing `gradle-wrapper.jar` is standard Gradle practice; CI adds Gradle's `wrapper-validation` check to guard its integrity.)
+- **Compilation JDK is pinned via Gradle Java toolchains**, not inherited from whatever launches Gradle:
+  ```kotlin
+  kotlin { jvmToolchain(17) }   // exact version per D12 ruling
+  ```
+  This decouples the launcher JDK from the compile JDK — so a machine with only JDK 23 installed still produces bytecode for the target version, and builds are reproducible across dev machines and CI.
+- **Bootstrap is a one-time human step** (chicken-and-egg: generating a wrapper requires a Gradle to run). Once done, never needed again. See §12.
+- **Deferred to milestone 4, not needed now:** the *build-with* Gradle version versus the *supported-floor* Gradle version (§E2/D9). `core` has zero Gradle API surface, so milestones 1–3 are unaffected by that question; it only binds when `plugin` starts depending on `gradleApi()`.
 
 ---
 
@@ -333,9 +352,17 @@ articulate/
 
 Blocking first; later items can wait until their milestone starts.
 
-1. **D1 — Repo layout** (§E1): multi-module `core`+`plugin`+`sample` (recommended) vs single module. *Blocks scaffolding.*
-2. **D2 — Test strategy** (§E3): three-tier (recommended) vs sample-only. *Blocks scaffolding/CI setup.*
-3. **D3 — Integer specifier mapping** (§2.3): `%d → %lld` (recommended) vs `%d → %d` pass-through. *Blocks corpus authoring (m2).*
+### Decided
+
+- ✅ **D1 — Repo layout** (§E1): **multi-module** `core` + `plugin` + `sample`. *Decided 2026-07-30.*
+- ✅ **D2 — Test strategy** (§E3): **three tiers** (core unit/corpus → TestKit → sample smoke). *Decided 2026-07-30.*
+- ✅ **D3 — Integer specifier mapping** (§2.3): **`%d → %lld`**, unconditional, not configurable. *Decided 2026-07-30.*
+- ✅ **D12 — Toolchain** (§E6): **committed Gradle wrapper + toolchain-pinned JDK**; bootstrap is a one-time human step. *Decided 2026-07-30.*
+
+**Unblocked by the above:** repo scaffolding and all of milestone 1. Milestone 1 touches only the in-memory model → canonical bytes; it needs no ruling below.
+
+### Still open
+
 4. **D4 — Inline markup & CDATA policy** (§2.2): hard error in v0 (recommended — no iOS equivalent, silent-loss risk) vs strip-tags vs verbatim pass-through. *Blocks corpus (m2).*
 5. **D5 — Locale edge policy** (§3.1): (a) `zh-rCN→zh-Hans` canonicalization default with `localeOverrides` escape hatch (recommended) vs literal pass-through; (b) non-locale qualifiers in `:i18n` are a hard error (recommended) vs ignored. *Blocks m3.*
 6. **D6 — `<string-array>`** (§8): reject in v0 (recommended). *Hub open question; blocks m2 error corpus.*
@@ -346,3 +373,30 @@ Blocking first; later items can wait until their milestone starts.
 11. **D11 — Publishing** (§E5): Plugin Portal first (recommended). *Needed before first release; also gates the portal-collision pre-flight check on the hub.*
 
 Plus one **pending input, not a decision**: the Xcode fixture trio (§1.4) — `handwritten.xcstrings`, `opened.xcstrings`, `xcode-version.txt` — from the hub pre-flight checklist. Milestones 1–3 proceed without it; the round-trip test and final `CanonicalFormat` values wait on it.
+
+---
+
+## 12. Bootstrap (one-time, human)
+
+Generating a Gradle wrapper requires an existing Gradle — chicken-and-egg. This machine has no `gradle` on `PATH` and no linked JDK (Homebrew `openjdk` 23 is installed but unlinked). Resolved once by a human, then never again: every subsequent invocation is `./gradlew`.
+
+**Route A — Android Studio (no installs).** Create a throwaway project via the New Project wizard, then copy its four wrapper artifacts into this repo:
+```
+gradlew
+gradlew.bat
+gradle/wrapper/gradle-wrapper.jar
+gradle/wrapper/gradle-wrapper.properties
+```
+Delete the throwaway. `chmod +x gradlew`.
+
+**Route B — Homebrew (one command, one-time install).**
+```bash
+brew install gradle && cd /Users/asarazan/projects/articulate && gradle wrapper
+```
+
+**Report back three values** so build files are pinned against reality rather than guessed:
+1. `distributionUrl` from `gradle/wrapper/gradle-wrapper.properties` (the Gradle version)
+2. Output of `./gradlew --version` (confirms the wrapper runs, and names the JDK it found)
+3. Android Studio's bundled JDK version, if using Route A (Settings → Build Tools → Gradle → Gradle JDK)
+
+Everything else — `settings.gradle.kts`, `build.gradle.kts`, `gradle/libs.versions.toml`, `core/build.gradle.kts` — is plain text requiring no toolchain, written once those versions are known.
