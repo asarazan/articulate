@@ -129,14 +129,35 @@ Android's resource compiler applies non-obvious lexing rules that we must replic
 | Whitespace collapse | unquoted runs of whitespace/newlines collapse to single space | `whitespace-collapse` |
 | Leading `@` / `?` | must be escaped in Android; unescape on parse | `escapes-at-question` |
 | XML entities | `&amp;` `&lt;` `&gt;` `&quot;` `&apos;` resolved by the XML parser | `xml-entities` |
-| CDATA | content taken verbatim | policy — see D4 |
-| Inline markup (`<b>`, `<i>`, `<u>`, `<annotation>`, arbitrary HTML) | **no iOS equivalent** | policy — see D4 |
+| CDATA | **not verbatim** (corrected — see D4): same escape/whitespace pipeline as normal text, only XML tag/entity interpretation is suppressed inside it | `cdata-not-verbatim`, `cdata-inert-markup`, `error-cdata-apostrophe` |
+| `<xliff:g>` placeholder annotation | unwrap transparently — drop the tag, keep inner text; lift `id`/`example` into the catalog `comment` (decided — D4) | `xliff-g-unwrap`, `xliff-g-whitespace` |
+| Inline styling markup (`<b>`, `<i>`, `<u>`, `<annotation>`, `<font>`, `<br/>`, arbitrary HTML) | **hard error by default** — no iOS equivalent, information provably cannot survive (decided — D4); `markupPolicy` DSL override ships in v0, non-default modes implemented later | `error-styled-nonpositional`, `span-double-space` |
 | `translatable="false"` | excluded from catalog entirely (and from Android copy? no — copied for Android, skipped for iOS) | `translatable-false` |
 | Duplicate key in one file | error | `error-duplicate-key` |
 | Key present in locale but not in default `values/` | error (orphan translation) | `error-orphan-key` |
 | Key legality | must be a valid Android resource name; validated even though source is hand-authored | `error-bad-key` |
 
 Parsing uses a standard StAX/DOM XML parser with DTD/external-entity resolution **disabled** (no XXE), position-aware for error messages.
+
+**This table is a summary; `docs/CONVERSIONS.md` is the authoritative, cited spec for milestone 2** — it corrects several other rows above too (whitespace collapse, XML entity handling, `%f`/`%g`/`%x`/`%o`, `translatable="false"`, key legality) and adds ~49 corpus cases this table doesn't list. Merging those corrections fully into this table is separate, still-pending work; only the D4-relevant rows are updated here because D4 is now ruled.
+
+### D4 — inline markup & CDATA policy — DECIDED (2026-07-30)
+
+Research (`docs/CONVERSIONS.md` §5–6) found the original one-line framing conflated three unrelated questions. Split and ruled separately:
+
+- **CDATA — not actually a policy question.** The plan's premise ("content taken verbatim") was factually wrong: CDATA only suppresses XML tag/entity interpretation, everything else (escaping, whitespace collapse, quoting) runs identically to normal text. **Ruling: support it**, parsed per the corrected rules — it costs no parser complexity beyond what normal text already needs, so there was no real reason to carve it out as unsupported.
+- **`<xliff:g>` — not markup either.** Verified as a distinct AOSP code path (an "untranslatable section," not a style span): format verification still runs, whitespace collapses correctly across it, and it's the standard real-world idiom for placeholder metadata (used throughout AOSP itself). **Ruling: unwrap transparently** — drop the tag, keep the inner text, lift `id`/`example` attributes into the catalog's `comment` field. Not optional: erroring on it would reject a large share of real-world `strings.xml` files, and treating it as a span would be a category error since it structurally isn't one.
+- **Genuine styling markup** (`<b>`, `<i>`, `<u>`, `<annotation>`, `<font>`, `<br/>`, arbitrary HTML) **— the real judgment call. Ruling: hard error by default in v0.** `.xcstrings` values are flat strings with no span concept, so styling information provably cannot survive the conversion — and Android's own plain-text channel for a styled string is *already* lossy (`<br/>` produces no newline outside the span), so silently stripping tags wouldn't degrade to plain text, it would degrade to text that's *wrong*, in a language the developer can't read to catch it. An error is loud and precise instead.
+
+**Escape hatch — wider than originally proposed.** The initial proposal was a binary `markupPolicy = ERROR | STRIP` knob. Ruling: **three-way**, `ERROR | STRIP | VERBATIM`, default `ERROR`:
+
+```kotlin
+enum class MarkupPolicy { ERROR, STRIP, VERBATIM }
+```
+
+`VERBATIM` (ship the raw tags through as literal text) was flagged in research as the weakest of the three options on its own — it produces a visible, shipped defect rather than a build-time error — but the ruling is to make it available as an explicit, informed opt-in rather than omit it: someone migrating an existing pipeline, or post-processing the catalog downstream, may have a specific reason to want it, and the non-default gate means choosing it is a deliberate act, not an accident. The knob itself ships in v0 (so the DSL shape doesn't change later); `STRIP` and `VERBATIM`'s actual *implementations* are deferred — `STRIP` to v0.1 per the original plan, `VERBATIM` unscheduled since it's pure pass-through and lower priority than `STRIP`.
+
+Corpus cases: `cdata-not-verbatim`, `cdata-inert-markup`, `error-cdata-apostrophe`, `xliff-g-unwrap`, `xliff-g-whitespace`, `xliff-g-attrs-to-comment`, `error-nested-xliff-g`, `error-styled-nonpositional`, `span-double-space`, `foreign-namespace-warn` (all from `docs/CONVERSIONS.md` §12).
 
 ### 2.3 Placeholder conversion (the transform)
 
@@ -359,12 +380,12 @@ Blocking first; later items can wait until their milestone starts.
 - ✅ **D2 — Test strategy** (§E3): **three tiers** (core unit/corpus → TestKit → sample smoke). *Decided 2026-07-30.*
 - ✅ **D3 — Integer specifier mapping** (§2.3): **`%d → %lld`**, unconditional, not configurable. *Decided 2026-07-30.*
 - ✅ **D12 — Toolchain** (§E6): **committed Gradle wrapper + toolchain-pinned JDK**; bootstrap is a one-time human step. *Decided 2026-07-30.*
+- ✅ **D4 — Inline markup & CDATA policy** (§2.2): CDATA supported (corrected — was never actually a policy question); `<xliff:g>` unwrapped transparently (not optional — real-world necessity); genuine styling markup hard-errors by default, with a three-way `markupPolicy = ERROR | STRIP | VERBATIM` DSL escape hatch shipped in v0 (`STRIP`/`VERBATIM` implementations deferred). Full ruling in §2.2. *Decided 2026-07-30.*
 
-**Unblocked by the above:** repo scaffolding and all of milestone 1. Milestone 1 touches only the in-memory model → canonical bytes; it needs no ruling below.
+**Unblocked by the above:** repo scaffolding and all of milestone 1 (as before), plus milestone 2's non-markup corpus work can now proceed all the way through markup/CDATA/xliff:g cases once parser work starts.
 
 ### Still open
 
-4. **D4 — Inline markup & CDATA policy** (§2.2): hard error in v0 (recommended — no iOS equivalent, silent-loss risk) vs strip-tags vs verbatim pass-through. *Blocks corpus (m2).*
 5. **D5 — Locale edge policy** (§3.1): (a) `zh-rCN→zh-Hans` canonicalization default with `localeOverrides` escape hatch (recommended) vs literal pass-through; (b) non-locale qualifiers in `:i18n` are a hard error (recommended) vs ignored. *Blocks m3.*
 6. **D6 — `<string-array>`** (§8): reject in v0 (recommended). *Hub open question; blocks m2 error corpus.*
 7. **D7 — v0 scope** (§8): milestones 1–5 in v0, Swift lint as v0.1 (recommended). *Hub open question; shapes everything after m3.*
