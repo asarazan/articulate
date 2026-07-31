@@ -34,7 +34,13 @@ internal data class FlattenedContent(
  */
 internal class ContentFlattener(private val filePath: String) {
 
-    fun flatten(reader: XMLStreamReader, endLocalName: String): FlattenedContent {
+    /**
+     * [key] is the resource name the content belongs to, threaded through purely
+     * so a failure raised in here still names its key -- PLAN.md §2.1 requires
+     * every message to name the file *and* the key, and a flattener-level error
+     * (nested `<xliff:g>`) is as much about one entry as any other.
+     */
+    fun flatten(reader: XMLStreamReader, endLocalName: String, key: String?): FlattenedContent {
         val text = StringBuilder()
         val xliffPlaceholders = mutableListOf<XliffPlaceholder>()
         var hasRealSpan = false
@@ -65,9 +71,10 @@ internal class ContentFlattener(private val filePath: String) {
                                 if (insideXliffG) {
                                     throw ConversionException(
                                         position,
-                                        null,
+                                        key,
                                         "illegal nested XLIFF 'g' tag -- <xliff:g> cannot contain " +
-                                            "another <xliff:g>",
+                                            "another <xliff:g>. Remove the inner tag: one <xliff:g> " +
+                                            "already annotates the whole placeholder",
                                     )
                                 }
                                 val id = reader.getAttributeValue(null, "id")

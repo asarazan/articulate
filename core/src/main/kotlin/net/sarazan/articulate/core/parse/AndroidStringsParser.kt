@@ -5,6 +5,7 @@ import java.io.File
 import java.io.InputStream
 import javax.xml.stream.XMLInputFactory
 import javax.xml.stream.XMLStreamConstants
+import javax.xml.stream.XMLStreamException
 import javax.xml.stream.XMLStreamReader
 
 private val QUANTITY_TO_CATEGORY: Map<String, PluralCategory> = mapOf(
@@ -38,10 +39,29 @@ internal object AndroidStringsParser {
         val reader = factory.createXMLStreamReader(input)
         try {
             return parseDocument(reader, filePath)
+        } catch (e: XMLStreamException) {
+            // S0 failures (an invalid character reference such as `&#11;`, a stray
+            // `&`, an unclosed tag) surface as a raw StAX exception whose message
+            // names neither the file nor a fix -- PLAN.md §2.1 requires both of every
+            // failure Articulate reports. Re-shape it here rather than letting the
+            // parser's own diagnostic escape.
+            throw ConversionException(
+                XmlPosition(filePath, e.location?.lineNumber ?: -1, e.location?.columnNumber ?: -1),
+                null,
+                "XML parse error -- this file is not well-formed XML, so no string in it can be " +
+                    "read: ${e.rawMessage()}. Note that XML 1.0 forbids most control characters " +
+                    "outright, so an invalid XML character reference (e.g. '&#11;') must be " +
+                    "removed rather than escaped; use Android's own '\\uXXXX' escape if the " +
+                    "character is genuinely wanted.",
+            )
         } finally {
             reader.close()
         }
     }
+
+    /** StAX prefixes its messages with a multi-line `ParseError at [row,col]` banner; drop it. */
+    private fun XMLStreamException.rawMessage(): String =
+        message.orEmpty().substringAfterLast("Message: ").trim().ifEmpty { toString() }
 
     private fun parseDocument(reader: XMLStreamReader, filePath: String): ParsedFile {
         val flattener = ContentFlattener(filePath)
@@ -127,7 +147,7 @@ internal object AndroidStringsParser {
         val translatable = parseBooleanAttr(reader, "translatable", position, name) ?: true
         val formatted = parseBooleanAttr(reader, "formatted", position, name) ?: true
 
-        val flattened = flattener.flatten(reader, "string")
+        val flattened = flattener.flatten(reader, "string", name)
         if (flattened.hasRealSpan) throw styledMarkupError(flattened, filePath, name)
 
         val value = AndroidTextPipeline.process(flattened.rawText, position, name)
@@ -169,9 +189,14 @@ internal object AndroidStringsParser {
                                 "'quantity'. Legal values are: zero, one, two, few, many, other",
                         )
                     if (variants.containsKey(category)) {
-                        throw ConversionException(itemPosition, name, "duplicate quantity '$quantityAttr'")
+                        throw ConversionException(
+                            itemPosition,
+                            name,
+                            "duplicate quantity '$quantityAttr' -- each quantity may appear at most " +
+                                "once in a <plurals>. Remove or merge the repeated <item>",
+                        )
                     }
-                    val flattened = flattener.flatten(reader, "item")
+                    val flattened = flattener.flatten(reader, "item", name)
                     if (flattened.hasRealSpan) throw styledMarkupError(flattened, filePath, name)
                     val value = AndroidTextPipeline.process(flattened.rawText, itemPosition, name)
                     variants[category] = value

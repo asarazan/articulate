@@ -669,7 +669,7 @@ Two refinements the plan does not capture:
 | `%f`, `%.Nf`, `%e`, `%E` | **unchanged** | **VERIFIED** | see P2 |
 | `%g`, `%G` | **HARD ERROR** | **VERIFIED — [CORRECTS PLAN]** | see P3 |
 | `%x`, `%X`, `%o` | **`%llx`, `%llX`, `%llo`** | **VERIFIED — [CORRECTS PLAN]** | see P4 |
-| `%a`, `%A` | unchanged | BEST-EFFORT | both are C99 hex-float; not exercised. Rare enough to error on instead. |
+| `%a`, `%A` | **HARD ERROR** | BEST-EFFORT | both are C99 hex-float; not exercised. Rare enough to reject rather than guess at. *(Cell corrected 2026-07-30 during the milestone-2 audit: it previously read "unchanged", contradicting this same row's own prose and `PLAN.md` §2.3, which both say hard-error. The implementation hard-errors; the table cell was the stale half.)* |
 | `%%` | `%%` | VERIFIED | literal percent on both sides |
 | `%n` | HARD ERROR | VERIFIED | Java: platform line separator `[DOC: Formatter]`. No C equivalent; `%n` is not a conversion in Foundation. |
 | `%b`, `%B`, `%h`, `%H` | HARD ERROR | VERIFIED | Java-only: `%b`→`String.valueOf(boolean)`, `%h`→`Integer.toHexString(arg.hashCode())` `[DOC: Formatter]` |

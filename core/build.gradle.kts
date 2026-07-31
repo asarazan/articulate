@@ -18,4 +18,15 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+
+    // The golden corpus (PLAN.md §2.1) is read straight off the filesystem by
+    // CorpusTest's @TestFactory rather than from the test *resources* tree, so
+    // Gradle cannot infer it as an input. Without this declaration, editing a
+    // corpus fixture leaves `:core:test` UP-TO-DATE and the change is never
+    // executed — verified: appending an unmatchable required substring to an
+    // expected-error.txt still produced BUILD SUCCESSFUL. "Adding a case = adding
+    // files, no code" only holds if adding files actually re-runs the tests.
+    inputs.dir(layout.projectDirectory.dir("src/test/corpus"))
+        .withPropertyName("goldenCorpus")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }

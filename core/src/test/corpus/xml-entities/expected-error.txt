@@ -1,2 +1,3 @@
+key 'entities'
 odd number of unescaped
-entities
+Escape it as \" if a literal quote was intended

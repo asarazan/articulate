@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Source-language comment: this one owns the metadata -->
+    <string name="greeting">Hello</string>
+</resources>

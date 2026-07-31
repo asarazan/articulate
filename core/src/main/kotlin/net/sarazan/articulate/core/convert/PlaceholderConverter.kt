@@ -43,8 +43,18 @@ internal object PlaceholderConverter {
         if (!formatted) return value.replace("%", "%%")
 
         val specifiers = scan(value, position, key)
+        // Per-specifier legality is checked *before* positional discipline, and the
+        // order is load-bearing for the error message. `%y and %s and %d` (the
+        // `error-time-format-shortcircuit` case) violates both rules at once: it uses
+        // an unconvertible conversion character *and* has three unnumbered arguments.
+        // Reporting "non-positional format" first would send an author who typed `%y`
+        // off to add position numbers, only to hit a second error about the specifier
+        // they actually got wrong. An unsupported conversion character also means the
+        // argument list cannot be interpreted at all, so it is the more fundamental of
+        // the two defects as well as the more actionable one.
+        val converted = rewrite(value, specifiers, position, key)
         checkPositionalDiscipline(specifiers, position, key)
-        return rewrite(value, specifiers, position, key)
+        return converted
     }
 
     /** iOS-side conversion tokens, longest first so "lld" isn't mistaken for "l" + literal "ld". */
@@ -272,7 +282,16 @@ internal object PlaceholderConverter {
 
             't', 'T' -> error("date/time format specifiers ('%t...') are a Java-only conversion family with no iOS equivalent")
 
-            else -> error("unsupported format specifier '%${spec.conversion}'")
+            // Every conversion character in AAPT2's Time-format short-circuit set
+            // (`D F K M W Z k m w y z`, see P0) lands here, which is how Articulate
+            // closes that hole: AAPT2 abandons its own scan on seeing one of them and
+            // compiles the string clean, whereas here it is simply an unknown
+            // conversion and is rejected outright.
+            else -> error(
+                "unsupported format specifier '%${spec.conversion}' -- Articulate converts only " +
+                    "%s, %d, %f, %e, %E, %x, %X, %o and a literal %%. Fix the specifier, or use " +
+                    "formatted=\"false\" if this '%' was meant literally",
+            )
         }
     }
 

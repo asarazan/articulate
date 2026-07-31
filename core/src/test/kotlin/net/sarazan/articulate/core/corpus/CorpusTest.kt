@@ -68,6 +68,21 @@ class CorpusTest {
         val requiredSubstrings = expectedFile.readLines().map { it.trim() }.filter { it.isNotEmpty() }
         check(requiredSubstrings.isNotEmpty()) { "corpus case '$name': expected-error.txt has no content" }
 
+        // Guard against an assertion that cannot fail. Every message embeds the
+        // offending file's path, and that path contains the case's own directory
+        // name -- so a required substring drawn from the case name (`precision` in
+        // `error-string-precision`, `entities` in `xml-entities`) is satisfied by the
+        // path alone and tests nothing at all. Both of those shipped before this
+        // check existed.
+        val casePath = expectedFile.parentFile.path
+        for (required in requiredSubstrings) {
+            check(!casePath.contains(required)) {
+                "corpus case '$name': required substring '$required' also occurs in the case's own " +
+                    "path ('$casePath'), which every error message quotes -- the assertion can " +
+                    "never fail. Assert something from the message body instead."
+            }
+        }
+
         val message = try {
             AndroidToXcstringsConverter.convert(inputDir)
             null
@@ -80,6 +95,16 @@ class CorpusTest {
             assertTrue(message!!.contains(required)) {
                 "corpus case '$name': error message did not contain expected substring '$required'.\nActual message: $message"
             }
+        }
+
+        // PLAN.md §2.1: "messages must name the file, the key, and the fix". The
+        // file half is universal, so it is enforced here for every error case rather
+        // than left to each expected-error.txt to remember.
+        val inputFiles = inputDir.walkTopDown().filter { it.name == "strings.xml" }.map { it.path }.toList()
+        check(inputFiles.isNotEmpty()) { "corpus case '$name': no input strings.xml found" }
+        assertTrue(inputFiles.any { message!!.contains(it) }) {
+            "corpus case '$name': error message names none of the input files $inputFiles -- " +
+                "PLAN.md §2.1 requires every failure to name the file.\nActual message: $message"
         }
     }
 }

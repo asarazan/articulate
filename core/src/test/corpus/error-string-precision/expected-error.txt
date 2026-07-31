@@ -1,1 +1,3 @@
-precision
+key 'truncated'
+precision on a string specifier has no iOS equivalent
+Truncate the value before formatting instead
