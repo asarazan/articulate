@@ -363,7 +363,7 @@ Read at `ListenUpApp/ListenUp`, `tools/build-logic/convention/src/main/kotlin/li
 
 | Task | Input | Output |
 |---|---|---|
-| `generateAndroidRes` | strings tree (`@get:InputDirectory`, `@get:PathSensitive(RELATIVE)`) | `build/generated/i18n/res` — per-locale `values*/strings.xml` |
+| `generateAndroidRes` | strings tree (`@get:InputDirectory`, `@get:PathSensitive(RELATIVE)`) | per-locale `values*/strings.xml` — **location owned by AGP when variant-wired, see below** |
 | `generateXcstrings` | same | the committed `Shared.xcstrings`, at a DSL-configured path |
 | `generateStrings` | — | none; a lifecycle task that `dependsOn` both |
 
@@ -372,6 +372,18 @@ Read at `ListenUpApp/ListenUp`, `tools/build-logic/convention/src/main/kotlin/li
 Rejected: one task writing both (ListenUp's shape). Its merit was making divergence between the outputs structurally impossible, but that risk is already covered — both derive from the same `core` conversion, and §5's gate catches drift regardless. An aggregate costs nothing and buys each output accurate up-to-date semantics, plus the ability for CI to regenerate only the committed artifact.
 
 *Implementation note:* both tasks parse and convert independently rather than sharing an intermediate. That duplicates work, but the conversion is in-memory and trivial at realistic string counts — do not add a shared-state mechanism to avoid it, since shared state between tasks is a classic configuration-cache hazard.
+
+**CORRECTED 2026-07-30 — AGP owns the Android output location, not us.** Earlier revisions of this section stated the Android res tree lands at `build/generated/i18n/res` under the `:i18n` module. That is wrong whenever the `.android` plugin is doing its job. `addGeneratedSourceDirectory(task, wiredWith)` means AGP **sets the wired `DirectoryProperty` itself**, overriding any convention the task declared. Verified empirically by walking a real built fixture:
+
+```
+app/build/generated/res/generateAndroidRes/values/strings.xml      ← AGP's location
+app/build/generated/res/generateAndroidRes/values-de/strings.xml
+i18n/build/generated/i18n/res/                                      ← does not exist
+```
+
+So the output lands in the **consuming app project's** build directory, in a folder named after the task. Google's own "Extend AGP" page states the opposite — that the plugin author sets the output directory — which observation contradicts. That is the second time in this project a Google documentation claim has failed against a real tool run (the first was whitespace collapsing, `docs/CONVERSIONS.md` W3); the standing rule applies, **observation wins over documentation**.
+
+Consequences worth holding onto: the task's own output convention is effectively dead code under variant wiring, so do not reason about it when debugging; and any user-facing documentation of "where do the generated Android resources go" must name the app module's build dir, not `:i18n`'s.
 
 Both are byte-deterministic via m1's `XcstringsWriter` and the same canonical rules, so re-running without source changes must produce identical bytes — that property is what makes §5's gate meaningful.
 

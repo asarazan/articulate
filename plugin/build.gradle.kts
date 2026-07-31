@@ -7,6 +7,8 @@
 // module cannot accidentally compile against a newer AGP API that a
 // floor-Gradle/floor-AGP consumer's runtime wouldn't have — see
 // GradleFloorFunctionalTest, which exercises the actual floor via TestKit.
+import org.gradle.plugin.devel.tasks.PluginUnderTestMetadata
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
     `java-gradle-plugin`
@@ -18,6 +20,16 @@ kotlin {
     jvmToolchain(17)
 }
 
+// AGP added here, not as a `dependencies {}` scope, precisely so it is never
+// part of `compileClasspath`/`runtimeClasspath`/anything that flows into the
+// published POM of either plugin ID -- D10's whole point is that a
+// non-Android consumer of `net.sarazan.articulate` never pulls AGP onto its
+// classpath, and the two plugin IDs share this one jar. This configuration
+// exists purely to feed `pluginUnderTestMetadata` below, for TestKit.
+val agpTestKitClasspath: Configuration by configurations.creating {
+    isCanBeConsumed = false
+}
+
 dependencies {
     implementation(project(":core"))
     compileOnly(libs.android.gradle.plugin)
@@ -27,6 +39,8 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
+
+    agpTestKitClasspath(libs.android.gradle.plugin)
 }
 
 gradlePlugin {
@@ -50,6 +64,21 @@ gradlePlugin {
     // GradleRunner.withPluginClasspath() reads to make `plugins { id(...) }`
     // resolvable inside a TestKit fixture project without publishing anything.
     testSourceSets(sourceSets["test"])
+}
+
+// `PluginUnderTestMetadata.pluginClasspath` defaults to `sourceSets.main.runtimeClasspath`
+// alone, which never includes `compileOnly(libs.android.gradle.plugin)` --
+// `compileOnly` is deliberately excluded from every runtime classpath by
+// Gradle. Without this, ArticulateAndroidPlugin's compiled reference to
+// AGP's `ApplicationAndroidComponentsExtension` throws `NoClassDefFoundError`
+// inside any TestKit fixture built with `withPluginClasspath()`, since AGP's
+// classes are simply absent from the injected classpath -- not merely in a
+// different classloader. `.from()` on a `ConfigurableFileCollection` appends
+// rather than replaces, so this adds `agpTestKitClasspath` (AGP + its
+// transitive deps) alongside the existing default, without touching what
+// gets published (see `agpTestKitClasspath`'s own comment, above).
+tasks.named<PluginUnderTestMetadata>("pluginUnderTestMetadata") {
+    pluginClasspath.from(agpTestKitClasspath)
 }
 
 tasks.test {

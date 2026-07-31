@@ -78,4 +78,183 @@ internal object FunctionalTestSupport {
             .withPluginClasspath()
             .withArguments(*args)
             .forwardOutput()
+
+    /**
+     * The AGP-pinned version used everywhere an Android fixture applies
+     * `com.android.application` (D9's floor, `libs.versions.toml`'s `agp`).
+     */
+    const val AGP_VERSION = "8.5.2"
+
+    /**
+     * The Gradle version paired with [AGP_VERSION] (D9's floor, §E2).
+     * AGP 8.5.2 is not verified against the *building* Gradle (9.5.0, this
+     * repo's wrapper) -- AGP's own compatibility table pairs 8.5.x with the
+     * Gradle 8.7-8.9 range, and Gradle 9 removed APIs old AGP releases still
+     * use. Every Android fixture in [AndroidWiringFunctionalTest] therefore
+     * runs via `.withGradleVersion(GRADLE_FLOOR_VERSION)`, exactly like
+     * [GradleFloorFunctionalTest] already does for the non-Android plugin.
+     */
+    const val GRADLE_FLOOR_VERSION = "8.7"
+
+    /** `compileSdk`/`targetSdk`: the maximum AGP 8.5 supports (a ceiling, not a "tested up to" -- see the milestone 4/5 report). */
+    const val COMPILE_SDK = 34
+
+    /**
+     * Locates a real Android SDK the way a developer's machine actually has
+     * one -- `ANDROID_HOME`, then `ANDROID_SDK_ROOT`, then this machine's
+     * default install path -- and never relies on the ambient shell
+     * environment alone: `ANDROID_HOME` is not set in non-interactive shells
+     * here (a `.zshrc` export doesn't reach them), and even where it is set,
+     * TestKit runs each fixture as a nested build in a fresh temp directory
+     * with no `local.properties` of its own (see [writeLocalProperties]).
+     * Returns `null` if none of the three candidates look like a real SDK
+     * (checked via the `platforms/` directory, not mere existence).
+     */
+    fun findAndroidSdk(): File? {
+        val candidates = listOfNotNull(
+            System.getenv("ANDROID_HOME"),
+            System.getenv("ANDROID_SDK_ROOT"),
+            "${System.getProperty("user.home")}/Library/Android/sdk",
+        )
+        return candidates.map(::File).firstOrNull { it.isDirectory && File(it, "platforms").isDirectory }
+    }
+
+    /**
+     * Writes `local.properties` into a TestKit fixture pointing at [sdkDir].
+     * Required because each TestKit run is a fresh temp project AGP cannot
+     * configure without knowing where the SDK is, and this project
+     * deliberately does not depend on ambient `ANDROID_HOME` reaching the
+     * nested build (it doesn't, reliably) -- see [findAndroidSdk]. Backslash
+     * escaping matters for a `.properties` file even though every SDK path
+     * used in practice here is POSIX.
+     */
+    fun writeLocalProperties(projectDir: Path, sdkDir: File) {
+        File(projectDir.toFile(), "local.properties").writeText(
+            "sdk.dir=${sdkDir.absolutePath.replace("\\", "\\\\")}\n",
+        )
+    }
+
+    /**
+     * Multi-module settings file for the Android fixtures: `:i18n` (the
+     * strings source module, `net.sarazan.articulate`) and `:app` (the
+     * Android app module, `net.sarazan.articulate.android` + `com.android.application`).
+     * `:i18n` is declared first so it evaluates first -- [ArticulateAndroidPlugin]'s
+     * cross-project task lookup in `androidComponents.onVariants` requires
+     * `:i18n`'s `generateAndroidRes` task to already be registered by the
+     * time `:app`'s AGP variant callbacks fire during `:app`'s own
+     * evaluation (§4.2/§4.5). `google()` is required in `dependencyResolutionManagement`
+     * even though AGP's own jar reaches the fixture via the injected
+     * plugin-under-test classpath, not via these repositories (see
+     * [writeAndroidAppModule]) -- AGP dynamically resolves its own runtime
+     * dependencies (aapt2's native binary, in particular) as ordinary Maven
+     * coordinates against *this* project's repositories once applied, and
+     * those are only published to Google's Maven repo. `pluginManagement`
+     * carries `google()` too, mirroring the real repo's root
+     * `settings.gradle.kts`, even though nothing here currently resolves a
+     * plugin marker through it.
+     */
+    fun writeAndroidSettings(projectDir: Path, name: String = "fixture", modules: List<String> = listOf("i18n", "app")) {
+        File(projectDir.toFile(), "settings.gradle").writeText(
+            """
+            pluginManagement {
+                repositories {
+                    google()
+                    gradlePluginPortal()
+                    mavenCentral()
+                }
+            }
+            dependencyResolutionManagement {
+                repositories {
+                    google()
+                    mavenCentral()
+                }
+            }
+            rootProject.name = '$name'
+            ${modules.joinToString("\n            ") { "include ':$it'" }}
+            """.trimIndent(),
+        )
+    }
+
+    /**
+     * The Android app module: applies `net.sarazan.articulate.android` and
+     * `com.android.application` (pinned to [AGP_VERSION] via `plugin`'s own
+     * `testImplementation(libs.android.gradle.plugin)`, see `plugin/build.gradle.kts`),
+     * with `articulateAndroid { i18nProject = ... }` pointing back at the
+     * sibling i18n module.
+     *
+     * AGP is applied with the **legacy** `apply plugin: 'com.android.application'`
+     * rather than `plugins { id 'com.android.application' version '...' }`
+     * deliberately: [ArticulateAndroidPlugin] references AGP's
+     * `ApplicationAndroidComponentsExtension` API, and that reference only
+     * resolves at runtime here if AGP's classes live in the *same* classloader
+     * TestKit's `withPluginClasspath()` injects our plugin's own classes
+     * into. Requesting `com.android.application` through the versioned
+     * `plugins {}` DSL resolves it independently (from `google()`), loading a
+     * second, distinct copy of AGP's classes in a different classloader --
+     * empirically this throws `NoClassDefFoundError` for
+     * `ApplicationAndroidComponentsExtension` even though the class is
+     * present under both names. The legacy `apply plugin:` form instead
+     * looks up an already-loaded implementation on the existing classpath,
+     * which is exactly the one `testImplementation` put there.
+     *
+     * Also drops a `Marker.java` referencing `R.string.hello` -- compiling it
+     * is the strongest available proof that the generated Android res
+     * actually reached AGP's resource merge and R-class generation, not
+     * merely that some task ran (see [AndroidWiringFunctionalTest]).
+     */
+    fun writeAndroidAppModule(
+        projectDir: Path,
+        moduleName: String = "app",
+        i18nProjectPath: String = ":i18n",
+        compileSdk: Int = COMPILE_SDK,
+        withMarker: Boolean = true,
+    ) {
+        val appDir = File(projectDir.toFile(), moduleName).apply { mkdirs() }
+        File(appDir, "build.gradle").writeText(
+            """
+            plugins {
+                id 'net.sarazan.articulate.android'
+            }
+
+            apply plugin: 'com.android.application'
+
+            android {
+                namespace 'net.sarazan.articulate.fixture.app'
+                compileSdk $compileSdk
+
+                defaultConfig {
+                    applicationId 'net.sarazan.articulate.fixture.app'
+                    minSdk 24
+                    targetSdk $compileSdk
+                }
+            }
+
+            articulateAndroid {
+                i18nProject = '$i18nProjectPath'
+            }
+            """.trimIndent(),
+        )
+        val mainDir = File(appDir, "src/main").apply { mkdirs() }
+        File(mainDir, "AndroidManifest.xml").writeText(
+            """
+            <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+                <application />
+            </manifest>
+            """.trimIndent(),
+        )
+        if (withMarker) {
+            val javaDir = File(mainDir, "java/net/sarazan/articulate/fixture/app").apply { mkdirs() }
+            File(javaDir, "Marker.java").writeText(
+                """
+                package net.sarazan.articulate.fixture.app;
+
+                /** Compiles only if R.string.hello resolves -- proof the generated Android res reached AGP's merge (PLAN.md §4.5). */
+                public final class Marker {
+                    public static final int HELLO_STRING_ID = R.string.hello;
+                    private Marker() {}
+                }
+                """.trimIndent(),
+            )
+        }
+    }
 }

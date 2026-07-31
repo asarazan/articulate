@@ -46,6 +46,18 @@ class ArticulateAndroidPlugin : Plugin<Project> {
             androidComponents.onVariants { variant ->
                 val i18nProjectPath = extension.i18nProject.get()
                 val i18nProject = try {
+                    // Force the i18n project to be fully evaluated before this
+                    // cross-project lookup, regardless of project declaration/
+                    // evaluation order in the consumer's settings file. Without
+                    // this, a build where the app module happens to be
+                    // evaluated before the i18n module would see this plugin
+                    // throw a false "no generateAndroidRes task" error below --
+                    // not because net.sarazan.articulate wasn't applied, but
+                    // merely because that project hadn't registered its tasks
+                    // yet at the moment this callback ran. onVariants fires
+                    // once per project's own evaluation, with no guarantee
+                    // sibling projects have already evaluated first.
+                    project.evaluationDependsOn(i18nProjectPath)
                     project.project(i18nProjectPath)
                 } catch (e: UnknownProjectException) {
                     throw GradleException(
