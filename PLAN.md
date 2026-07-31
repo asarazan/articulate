@@ -607,13 +607,18 @@ Blocking first; later items can wait until their milestone starts.
 **Milestone 4 is fully unblocked** — every decision it depends on is ruled, and the brief's mandate to read ListenUp's `listenup.localization.gradle.kts` is discharged (§4.1, seven lessons extracted).
 
 ### Still open
-7. **D7 — v0 scope** (§8): milestones 1–5 in v0, Swift lint as v0.1 (recommended). *Hub open question; shapes everything after m3.* **Two research flags:** the m2 corpus grew ~40 → ~65 cases (real added work in the milestone the plan already calls the gate); and m6 should be re-specced to drive off `xcstringstool generate-symbols` output rather than the currently-planned regex scanner — exact instead of heuristic. Timing still correct, design needs revisiting before anyone writes that regex.
-8. **D8 — SwiftPM story** (§8): documented workaround, no v0 code (recommended). *Hub open question; docs-only, can be ruled anytime before release.*
-9. **D9 — Gradle/AGP floor** (§E2): Gradle 8.5 + AGP 8.1 floor with 3-cell matrix (recommended). *Needed by m4.*
-10. **D10 — Plugin ID / DSL shape** (§E4): two plugin IDs (recommended) vs one. *Needed by m4.*
-11. **D11 — Publishing** (§E5): Plugin Portal first (recommended). *Needed before first release; also gates the portal-collision pre-flight check on the hub.*
 
-Plus one **pending input, not a decision**: the Xcode fixture trio (§1.4) — `handwritten.xcstrings`, `opened.xcstrings`, `xcode-version.txt` — from the hub pre-flight checklist. Milestones 1–3 proceed without it; the round-trip test and final `CanonicalFormat` values wait on it.
+Only two decisions remain, neither blocking any implemented or specified milestone:
+
+- **D8 — SwiftPM story** (§8): documented workaround, no v0 code (recommended). *Docs-only; premise verified — `xcstringstool` lives in `Xcode.app/Contents/Developer/usr/bin/`, not the Swift toolchain, so `swift build` genuinely cannot reach it. Rule any time before release.*
+- **D11 — Publishing** (§E5): Plugin Portal first (recommended). *Needed before the first release, and it gates the Plugin Portal name-collision check still open on the hub pre-flight list.*
+
+**Design item carried forward, not a decision:** milestone 6's scanner should be re-specced to drive off `xcstringstool generate-symbols --language swift` output rather than the regex heuristic currently sketched in §6 — exact instead of approximate. Revisit before anyone writes that regex; it does not affect v0, which excludes m6 per D7.
+
+### Pending human input (not decisions)
+
+- **The Xcode fixture trio** (§1.4) — `handwritten.xcstrings`, `opened.xcstrings`, `xcode-version.txt`. Drop location and instructions wait at `core/src/test/fixtures/xcode/README.md`; `RoundTripTest` is written and parked on it. Milestones 1–3 completed without it; it finalizes `CanonicalFormat`'s provisional values and unblocks the structural diff in §5.
+- **`zh-rSG` / `zh-rMO` and other non-CN/TW/HK Chinese regions** (§3.1). Currently fall through to plain region tags (`zh-SG`, `zh-MO`), pinned by a test so the behavior cannot drift silently. Evidence genuinely cuts both ways: CLDR and Apple's `Locale.Language.maximalIdentifier` treat Singapore as Simplified and Macau as Traditional, but D5a's decided CN/TW/HK rule is itself asymmetric in a way matching neither Apple's maximal nor minimal output, and Apple's own shipped apps use both conventions. Deliberately left unruled rather than compounding a guess.
 
 ---
 
