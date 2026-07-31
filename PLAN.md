@@ -279,6 +279,14 @@ Rules with no Android-side counterpart, verified against `xcstringstool` from Xc
 
 **`translatable="false"` — DECIDED (2026-07-30): emit with `"shouldTranslate": false`, do not drop.** The original plan excluded such strings from the catalog entirely. Research found `.xcstrings` has a native equivalent whose semantics match Android's exactly — in both systems the string ships in the build and is merely withheld from translation tooling. Dropping it instead would break key parity between platforms for no reason, silently remove a string the iOS app may legitimately reference, and discard information the target format can represent natively. Also ruled: supplying a translation for a key marked non-translatable is an error (no definitive Lint precedent found, but it is unambiguously an authoring mistake and erroring costs nothing).
 
+### 2.7 Diagnostics channel — DECIDED (2026-07-30)
+
+**`convert()` returns warnings alongside the catalog.** The M2 audit found that `core` has no warning channel at all, so the two "warn" rules the spec requires — foreign-namespace tags (M5: warn, drop tag, keep children) and irregular key names (K1: warn on `.`/`-`/non-ASCII, which break Swift symbol generation *and* `R.` access) — could only assert their silent half. Their corpus cases (`foreign-namespace-warn`, `key-dot-dash-warn`) currently promise coverage that does not exist.
+
+Ruling: the conversion entry point returns a result carrying **both** the `StringCatalog` and an ordered list of diagnostics, each with severity, source position, key, and message. Rationale: it makes the warn rules testable immediately, closes the two misleading corpus cases, and hands milestone 4's Gradle task something to log — while `core` still has no external consumers, so the API change is free now and expensive later. Rejected: deferring to m4 (leaves two corpus cases lying in the meantime), and collapsing warnings into errors-or-silence (dotted keys are genuinely worth flagging without failing a build over).
+
+The corpus format needs a matching addition — an optional `expected-warnings.txt` per case, asserted the same way `expected-error.txt` is, so a warn rule's coverage is real rather than nominal.
+
 **Exit criteria:** corpus ≥ 65 cases green including all error cases (raised from ~40 — research added ~49 new cases; see `docs/CONVERSIONS.md` §12 for the full index); `docs/CONVERSIONS.md` kept 1:1 with the corpus as the cited spec of record.
 
 ---
@@ -301,12 +309,18 @@ Implemented as an explicit hand-rolled table + tiny parser — **not** `java.uti
 | `values-in` | `id` | legacy ISO-639 remap |
 | `values-iw` | `he` | legacy |
 | `values-ji` | `yi` | legacy |
-| `values-zh-rCN` / `values-zh-rTW` | `zh-Hans` / `zh-Hant` **(proposed — Decision D5)** | script canonicalization |
+| `values-zh-rCN` / `values-zh-rTW` | `zh-Hans` / `zh-Hant` **(decided — D5a)** | script canonicalization |
+| `values-id` / `values-he` / `values-yi` | `id` / `he` / `yi` | modern spellings, **also accepted** |
+| `values-b+es+419` | `es-419` | map from the *directory name* — see below |
+| `values-night`, `values-v21`, `values-sw600dp`, `values-de-rDE-night` | **hard error (decided — D5b)** | non-locale qualifier |
 
-- **D5 (zh policy):** Apple's ecosystem keys Chinese by script (`zh-Hans`/`zh-Hant`), not region. Proposal: canonicalize `zh-rCN→zh-Hans`, `zh-rTW→zh-Hant`, `zh-rHK→zh-Hant-HK`(? or `zh-Hant`), with a DSL escape hatch `localeOverrides = mapOf("zh-rCN" to "zh-Hans")` making every canonicalization overridable and visible. Alternative: literal `zh-CN` pass-through (Xcode tolerates it, but it diverges from every Apple default and from hand-authored catalogs). Needs ruling on the default; the override hook ships regardless.
-- **Non-locale qualifiers** (`values-night`, `values-v21`, `values-sw600dp`, `values-en-rGB-night`): proposal (D5b, same ruling) — **hard error in the `:i18n` module.** The module is platform-neutral by settled decision; density/night/API qualifiers are platform presentation concerns and have no iOS meaning. Erroring keeps the source tree honest. Alternative: silently ignore for iOS but copy for Android — rejected as a silent-divergence trap, but listed for completeness.
-- **Collision detection:** `values-iw` + `values-he` both present (or any two dirs mapping to one tag) → error naming both directories.
+- **D5a (zh policy) — DECIDED (2026-07-30): canonicalize to script.** `zh-rCN`→`zh-Hans`, `zh-rTW`→`zh-Hant`, `zh-rHK`→`zh-Hant-HK`. Apple's ecosystem keys Chinese by script rather than region, so this is what Xcode and any hand-authored `Localizable.xcstrings` beside our generated file expect. Literal `zh-CN` pass-through was rejected: Xcode tolerates it, but it diverges from every Apple default. The DSL escape hatch `localeOverrides = mapOf("zh-rCN" to "zh-Hans")` ships regardless, making every canonicalization overridable and visible at the call site.
+- **D5b (non-locale qualifiers) — DECIDED (2026-07-30): hard error in the `:i18n` module.** Research turned this from a style question into a correctness one: `values-de` and `values-de-night` are *distinct configs* to AAPT2 (the latter normalizes to `de-rDE-night-v8`), so silently stripping the qualifier maps **both to `de`** — a key collision resolved by whichever directory happens to be read last. That is silent data loss, not mere divergence. The module is platform-neutral by settled decision; density/night/API qualifiers are presentation concerns with no iOS meaning. Corpus must include a `values-de` + `values-de-night` pair proving the collision is caught rather than resolved.
+- **Accept both legacy and modern spellings on input.** Verified: **AAPT2 remaps nothing in either direction** — `values-in` and `values-id` are both accepted and both survive verbatim, as are `iw`/`he` and `ji`/`yi`. So source trees in the wild use either, and the mapper must handle both. The output direction (`in`→`id`, `iw`→`he`, `ji`→`yi`) matches Java's own modern behavior, but **cite the Java 17+ javadoc specifically** — the direction reversed in 17, and a pre-17 citation states the opposite.
+- **Map from the directory name, never from an AAPT2-normalized config.** Verified: `values-b+es+419` normalizes to `es-r419` inside AAPT2, i.e. it does *not* uniformly preserve BCP-47 spelling — it round-trips through its own config representation. Reading AAPT2's normalized form would therefore lose the distinction the author wrote.
+- **Collision detection:** any two directories mapping to one tag → error naming **both** directories. This now covers three distinct sources: legacy/modern pairs (`values-iw` + `values-he`), script canonicalization (`values-zh-rCN` + `values-b+zh+Hans`), and the qualifier case above.
 - Region/script casing normalized (`pt-rbr` → `pt-BR`).
+- Supporting evidence for every row: `docs/CONVERSIONS.md` §11, verified by compiling one `strings.xml` per qualifier directory and reading back `aapt2 dump configurations`.
 
 ### 3.2 Tests
 
@@ -470,12 +484,12 @@ Blocking first; later items can wait until their milestone starts.
 - ✅ **D6 — `<string-array>` policy** (§8): **reject at parse time in v0**, error names the array and suggests `foo_0`/`foo_1` plain strings. *Decided 2026-07-30.*
 - ✅ **D3a — `%x`/`%o` mapping** (§2.3): **`%llx` / `%llX` / `%llo`**, extending D3's reasoning to hex/octal on verified evidence of the same 32-bit truncation. *Decided 2026-07-30.*
 - ✅ **`translatable="false"` handling** (§2.6): **emit with `"shouldTranslate": false`**, do not drop — `.xcstrings` has a native equivalent with matching semantics. *Decided 2026-07-30.*
+- ✅ **D5 — Locale edge policy** (§3.1): (a) **canonicalize Chinese to script** (`zh-rCN`→`zh-Hans`, `zh-rTW`→`zh-Hant`), with the `localeOverrides` hook shipping regardless; (b) **non-locale qualifiers are a hard error** — `values-de` and `values-de-night` would otherwise both map to `de`, silently losing one. *Decided 2026-07-30.*
+- ✅ **Diagnostics channel** (§2.7): **`convert()` returns warnings alongside the catalog** — closes the two "warn" rules that currently assert only their silent half, and gives m4's task something to log. Corpus gains an optional `expected-warnings.txt`. *Decided 2026-07-30.*
 
-**Milestone 2 is fully unblocked.** Every decision M2's corpus and parser depend on is now ruled; §2.2–§2.6 carry the merged, research-corrected rules, with `docs/CONVERSIONS.md` as the cited spec of record.
+**Milestones 2 and 3 are both fully unblocked.** §2.2–§2.7 and §3.1 carry the merged, research-corrected rules, with `docs/CONVERSIONS.md` as the cited spec of record.
 
 ### Still open
-
-5. **D5 — Locale edge policy** (§3.1): (a) `zh-rCN→zh-Hans` canonicalization default with `localeOverrides` escape hatch (recommended) vs literal pass-through; (b) non-locale qualifiers in `:i18n` are a hard error (recommended) vs ignored. *Blocks m3.* **Research strengthened (b) considerably:** `values-de` and `values-de-night` would both map to `de` — a silent key collision resolved by read order, i.e. data loss rather than mere divergence.
 7. **D7 — v0 scope** (§8): milestones 1–5 in v0, Swift lint as v0.1 (recommended). *Hub open question; shapes everything after m3.* **Two research flags:** the m2 corpus grew ~40 → ~65 cases (real added work in the milestone the plan already calls the gate); and m6 should be re-specced to drive off `xcstringstool generate-symbols` output rather than the currently-planned regex scanner — exact instead of heuristic. Timing still correct, design needs revisiting before anyone writes that regex.
 8. **D8 — SwiftPM story** (§8): documented workaround, no v0 code (recommended). *Hub open question; docs-only, can be ruled anytime before release.*
 9. **D9 — Gradle/AGP floor** (§E2): Gradle 8.5 + AGP 8.1 floor with 3-cell matrix (recommended). *Needed by m4.*
