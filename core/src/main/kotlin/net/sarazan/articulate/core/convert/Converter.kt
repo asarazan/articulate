@@ -1,5 +1,7 @@
 package net.sarazan.articulate.core.convert
 
+import net.sarazan.articulate.core.diagnostics.Diagnostic
+import net.sarazan.articulate.core.locale.AndroidLocaleMapper
 import net.sarazan.articulate.core.model.Entry
 import net.sarazan.articulate.core.model.LocaleTag
 import net.sarazan.articulate.core.model.Localization
@@ -15,6 +17,17 @@ import net.sarazan.articulate.core.parse.XmlPosition
 import java.io.File
 
 /**
+ * The result of [AndroidToXcstringsConverter.convert]: the merged catalog
+ * plus every non-fatal finding collected along the way, per PLAN.md §2.7.
+ * [diagnostics] is ordered: locale directories in the same sorted order
+ * `convert` reads them in, document order within each file.
+ */
+data class ConversionResult(
+    val catalog: StringCatalog,
+    val diagnostics: List<Diagnostic>,
+)
+
+/**
  * Merges one or more parsed `strings.xml` files (one per locale directory)
  * into a [StringCatalog], applying every cross-file rule from
  * `docs/CONVERSIONS.md` §2.4-§2.6 that a single-file parse can't check on its
@@ -22,11 +35,11 @@ import java.io.File
  * requirement, specifier parity across locales, and `translatable="false"`
  * versus a supplied translation.
  *
- * Locale directory names (`values-de`, `values-pt-rBR`, ...) are treated as
- * **opaque tags** here -- stripped of the `values-` prefix and passed straight
- * through as the catalog's [LocaleTag]. The `values-*` -> BCP-47 mapping table
- * is milestone 3 (D5 is unruled); mapping it here would be scope creep this
- * milestone explicitly excludes.
+ * Locale directory names (`values-de`, `values-pt-rBR`, ...) are mapped to
+ * BCP-47 [LocaleTag]s by [AndroidLocaleMapper] (milestone 3, PLAN.md §3.1),
+ * including its hard error for a non-locale qualifier (D5b) and the
+ * cross-directory collision check two directories mapping to the same tag
+ * requires.
  */
 object AndroidToXcstringsConverter {
 
@@ -34,16 +47,39 @@ object AndroidToXcstringsConverter {
      * [inputDir] must contain one subdirectory per locale: `values/` for the
      * source language and `values-<tag>/` for every translation, each holding
      * a `strings.xml`. Directories without a `strings.xml` are ignored.
+     *
+     * [localeOverrides] is PLAN.md §3.1's escape hatch: any directory's
+     * mapped tag can be pinned explicitly, keyed by the qualifier as written
+     * (everything after `values-`, or `""` for bare `values`). The Gradle DSL
+     * surface for this belongs to milestone 4; here it is a plain parameter.
      */
-    fun convert(inputDir: File, sourceLanguage: String = "en"): StringCatalog {
-        val localeFiles = inputDir.listFiles { f -> f.isDirectory }.orEmpty()
+    fun convert(
+        inputDir: File,
+        sourceLanguage: String = "en",
+        localeOverrides: Map<String, String> = emptyMap(),
+    ): ConversionResult {
+        val localeDirs = inputDir.listFiles { f -> f.isDirectory }.orEmpty()
             .sortedBy { it.name }
             .mapNotNull { dir ->
                 val xml = File(dir, "strings.xml")
                 if (!xml.isFile) return@mapNotNull null
-                val tag = localeTagFor(dir.name, sourceLanguage) ?: return@mapNotNull null
-                tag to AndroidStringsParser.parse(xml)
+                if (dir.name != "values" && !dir.name.startsWith("values-")) return@mapNotNull null
+                dir to xml
             }
+
+        val mapped: List<Triple<LocaleTag, File, File>> = localeDirs.map { (dir, xml) ->
+            val tag = try {
+                AndroidLocaleMapper.androidQualifierToBcp47(dir.name, sourceLanguage, localeOverrides)
+            } catch (e: AndroidLocaleMapper.LocaleMappingException) {
+                throw ConversionException(XmlPosition(xml.path, -1, -1), null, e.message.orEmpty())
+            }
+            Triple(LocaleTag(tag), dir, xml)
+        }
+        checkLocaleCollisions(mapped)
+
+        val localeFiles: List<Pair<LocaleTag, ParsedFile>> = mapped.map { (tag, _, xml) ->
+            tag to AndroidStringsParser.parse(xml)
+        }
 
         val sourceTag = LocaleTag(sourceLanguage)
         val bySource = localeFiles.firstOrNull { it.first == sourceTag }
@@ -74,7 +110,33 @@ object AndroidToXcstringsConverter {
             entries[StringKey(name)] = buildEntry(name, sourceResource, sourceTag, localeFiles)
         }
 
-        return StringCatalog(sourceLanguage = sourceLanguage, entries = entries)
+        val diagnostics = localeFiles.flatMap { it.second.diagnostics }
+        return ConversionResult(StringCatalog(sourceLanguage = sourceLanguage, entries = entries), diagnostics)
+    }
+
+    /**
+     * D5b/§3.1: two directories mapping to the same output tag is silent data
+     * loss (whichever is read last wins), covering all three sources the
+     * plan calls out -- legacy/modern spelling pairs, script canonicalization,
+     * and (indirectly) the non-locale-qualifier case, since
+     * [AndroidLocaleMapper] rejects that before a collision could form. Error
+     * names both directories, as PLAN.md §3.1 requires.
+     */
+    private fun checkLocaleCollisions(mapped: List<Triple<LocaleTag, File, File>>) {
+        val byTag = mapped.groupBy({ it.first }, { it.second })
+        for ((tag, dirs) in byTag) {
+            if (dirs.size > 1) {
+                val xmlPaths = dirs.map { File(it, "strings.xml").path }
+                throw ConversionException(
+                    XmlPosition(xmlPaths[0], -1, -1),
+                    null,
+                    "locale directories ${dirs.joinToString(" and ") { "'${it.name}'" }} both map to " +
+                        "locale tag '${tag.value}' -- ${xmlPaths.joinToString(" and ")} would silently " +
+                        "overwrite each other's strings. Rename one directory, or pin an explicit " +
+                        "mapping via localeOverrides.",
+                )
+            }
+        }
     }
 
     private fun buildEntry(
@@ -237,9 +299,4 @@ object AndroidToXcstringsConverter {
         }
     }
 
-    private fun localeTagFor(dirName: String, sourceLanguage: String): LocaleTag? = when {
-        dirName == "values" -> LocaleTag(sourceLanguage)
-        dirName.startsWith("values-") -> LocaleTag(dirName.removePrefix("values-"))
-        else -> null
-    }
 }

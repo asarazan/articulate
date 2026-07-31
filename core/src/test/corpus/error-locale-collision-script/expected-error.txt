@@ -1,0 +1,3 @@
+both map to locale tag 'zh-Hans'
+values-b+zh+Hans
+values-zh-rCN

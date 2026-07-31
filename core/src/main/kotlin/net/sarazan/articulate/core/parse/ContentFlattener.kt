@@ -9,6 +9,9 @@ internal const val XLIFF_NAMESPACE_URI = "urn:oasis:names:tc:xliff:document:1.2"
 /** One `<xliff:g id="..." example="...">` tag's attributes, in document order. */
 internal data class XliffPlaceholder(val id: String?, val example: String?)
 
+/** M5: one dropped foreign-namespace tag, in document order. */
+internal data class ForeignNamespaceTag(val localName: String, val namespaceUri: String, val position: XmlPosition)
+
 /** The result of flattening one `<string>`/`<item>` element's content (S1). */
 internal data class FlattenedContent(
     val rawText: String,
@@ -16,6 +19,7 @@ internal data class FlattenedContent(
     val spanTagName: String?,
     val spanPosition: XmlPosition?,
     val xliffPlaceholders: List<XliffPlaceholder>,
+    val foreignNamespaceTags: List<ForeignNamespaceTag>,
 )
 
 /**
@@ -43,6 +47,7 @@ internal class ContentFlattener(private val filePath: String) {
     fun flatten(reader: XMLStreamReader, endLocalName: String, key: String?): FlattenedContent {
         val text = StringBuilder()
         val xliffPlaceholders = mutableListOf<XliffPlaceholder>()
+        val foreignNamespaceTags = mutableListOf<ForeignNamespaceTag>()
         var hasRealSpan = false
         var spanTagName: String? = null
         var spanPosition: XmlPosition? = null
@@ -98,10 +103,11 @@ internal class ContentFlattener(private val filePath: String) {
                             }
 
                             else -> {
-                                // M5: foreign namespace -- warn (not modelled as a return
-                                // value; correctness of the dropped-tag/kept-children
-                                // behavior is what the corpus checks), drop tag, keep
-                                // children, no state reset.
+                                // M5: foreign namespace -- warn, drop tag, keep children,
+                                // no state reset. Recorded here so the caller can surface
+                                // it as a [net.sarazan.articulate.core.diagnostics.Diagnostic]
+                                // (§2.7); this layer only detects and reports the tag.
+                                foreignNamespaceTags += ForeignNamespaceTag(local, uri, position)
                                 walk(insideXliffG)
                             }
                         }
@@ -126,7 +132,7 @@ internal class ContentFlattener(private val filePath: String) {
             "internal error: expected </$endLocalName>, found </${reader.localName}>"
         }
 
-        return FlattenedContent(text.toString(), hasRealSpan, spanTagName, spanPosition, xliffPlaceholders)
+        return FlattenedContent(text.toString(), hasRealSpan, spanTagName, spanPosition, xliffPlaceholders, foreignNamespaceTags)
     }
 }
 

@@ -1,0 +1,2 @@
+both map to locale tag 'he'
+Rename one directory, or pin an explicit mapping via localeOverrides

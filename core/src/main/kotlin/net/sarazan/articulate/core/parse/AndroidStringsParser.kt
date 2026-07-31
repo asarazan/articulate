@@ -1,5 +1,7 @@
 package net.sarazan.articulate.core.parse
 
+import net.sarazan.articulate.core.diagnostics.Diagnostic
+import net.sarazan.articulate.core.diagnostics.Severity
 import net.sarazan.articulate.core.model.PluralCategory
 import java.io.File
 import java.io.InputStream
@@ -66,6 +68,7 @@ internal object AndroidStringsParser {
     private fun parseDocument(reader: XMLStreamReader, filePath: String): ParsedFile {
         val flattener = ContentFlattener(filePath)
         val resources = mutableListOf<ParsedResource>()
+        val diagnostics = mutableListOf<Diagnostic>()
         val seenNames = mutableSetOf<String>()
         var pendingComment: String? = null
 
@@ -94,13 +97,13 @@ internal object AndroidStringsParser {
                     pendingComment = null
                     when (reader.localName) {
                         "string" -> {
-                            val resource = parseStringElement(reader, flattener, filePath, position, commentForThisElement)
+                            val resource = parseStringElement(reader, flattener, filePath, position, commentForThisElement, diagnostics)
                             checkDuplicate(seenNames, resource.name, position, filePath)
                             resources += resource
                         }
 
                         "plurals" -> {
-                            val resource = parsePluralsElement(reader, flattener, filePath, position, commentForThisElement)
+                            val resource = parsePluralsElement(reader, flattener, filePath, position, commentForThisElement, diagnostics)
                             checkDuplicate(seenNames, resource.name, position, filePath)
                             resources += resource
                         }
@@ -126,13 +129,13 @@ internal object AndroidStringsParser {
                 }
 
                 XMLStreamConstants.END_ELEMENT -> {
-                    if (reader.localName == "resources") return ParsedFile(filePath, resources)
+                    if (reader.localName == "resources") return ParsedFile(filePath, resources, diagnostics)
                 }
 
                 else -> Unit
             }
         }
-        return ParsedFile(filePath, resources)
+        return ParsedFile(filePath, resources, diagnostics)
     }
 
     private fun parseStringElement(
@@ -141,14 +144,17 @@ internal object AndroidStringsParser {
         filePath: String,
         position: XmlPosition,
         pendingComment: String?,
+        diagnostics: MutableList<Diagnostic>,
     ): ParsedResource.StringResource {
         val name = requireName(reader, position)
         checkKeyLegality(name, position)
+        keyIrregularityWarning(name, position)?.let { diagnostics += it }
         val translatable = parseBooleanAttr(reader, "translatable", position, name) ?: true
         val formatted = parseBooleanAttr(reader, "formatted", position, name) ?: true
 
         val flattened = flattener.flatten(reader, "string", name)
         if (flattened.hasRealSpan) throw styledMarkupError(flattened, filePath, name)
+        diagnostics += foreignNamespaceWarnings(flattened, name)
 
         val value = AndroidTextPipeline.process(flattened.rawText, position, name)
         val comment = mergeComments(pendingComment, buildXliffComment(flattened.xliffPlaceholders))
@@ -161,9 +167,11 @@ internal object AndroidStringsParser {
         filePath: String,
         position: XmlPosition,
         pendingComment: String?,
+        diagnostics: MutableList<Diagnostic>,
     ): ParsedResource.PluralResource {
         val name = requireName(reader, position)
         checkKeyLegality(name, position)
+        keyIrregularityWarning(name, position)?.let { diagnostics += it }
         val translatable = parseBooleanAttr(reader, "translatable", position, name) ?: true
         val formatted = parseBooleanAttr(reader, "formatted", position, name) ?: true
 
@@ -198,6 +206,7 @@ internal object AndroidStringsParser {
                     }
                     val flattened = flattener.flatten(reader, "item", name)
                     if (flattened.hasRealSpan) throw styledMarkupError(flattened, filePath, name)
+                    diagnostics += foreignNamespaceWarnings(flattened, name)
                     val value = AndroidTextPipeline.process(flattened.rawText, itemPosition, name)
                     variants[category] = value
                     val xliffComment = buildXliffComment(flattened.xliffPlaceholders)
@@ -288,6 +297,46 @@ internal object AndroidStringsParser {
             offset += Character.charCount(cp)
         }
     }
+
+    /**
+     * K1's "we are stricter than AAPT2" clause: `.`/`-`/non-ASCII are legal
+     * per the AOSP grammar (accepted by [checkKeyLegality] above) but break
+     * Xcode's `xcstringstool generate-symbols` and Kotlin/Java `R.` access,
+     * so we warn on them without rejecting them.
+     */
+    private fun keyIrregularityWarning(name: String, position: XmlPosition): Diagnostic? {
+        val hasDotOrDash = name.any { it == '.' || it == '-' }
+        val hasNonAscii = name.any { it.code > 0x7F }
+        if (!hasDotOrDash && !hasNonAscii) return null
+
+        val reasons = buildList {
+            if (hasDotOrDash) add("'.' or '-'")
+            if (hasNonAscii) add("non-ASCII characters")
+        }.joinToString(" and ")
+
+        return Diagnostic(
+            Severity.WARNING,
+            position,
+            name,
+            "key '$name' contains $reasons -- Xcode's 'xcstringstool generate-symbols' and " +
+                "Kotlin/Java 'R.' access both need a plain-ASCII identifier to generate anything " +
+                "usable from a key, so this key will not produce a usable generated symbol on " +
+                "either platform. The key is still accepted; consider renaming it to use only " +
+                "ASCII letters, digits, and '_'.",
+        )
+    }
+
+    /** M5: one [Diagnostic] per foreign-namespace tag [ContentFlattener] dropped for this resource. */
+    private fun foreignNamespaceWarnings(flattened: FlattenedContent, key: String): List<Diagnostic> =
+        flattened.foreignNamespaceTags.map { tag ->
+            Diagnostic(
+                Severity.WARNING,
+                tag.position,
+                key,
+                "warn: ignoring element '<${tag.localName}>' with unknown namespace " +
+                    "'${tag.namespaceUri}' -- the tag is dropped and its children's text is kept",
+            )
+        }
 }
 
 private fun XliffPlaceholder.describe(): String? = when {

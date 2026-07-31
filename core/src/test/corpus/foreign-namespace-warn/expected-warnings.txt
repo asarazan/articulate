@@ -1,0 +1,1 @@
+ignoring element '<foo>' with unknown namespace 'http://schemas.android.com/tools'

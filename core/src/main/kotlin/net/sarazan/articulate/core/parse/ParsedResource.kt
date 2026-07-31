@@ -1,5 +1,6 @@
 package net.sarazan.articulate.core.parse
 
+import net.sarazan.articulate.core.diagnostics.Diagnostic
 import net.sarazan.articulate.core.model.PluralCategory
 
 /**
@@ -34,8 +35,15 @@ internal sealed interface ParsedResource {
     ) : ParsedResource
 }
 
-/** Everything parsed from one `strings.xml` file (one locale directory). */
+/**
+ * Everything parsed from one `strings.xml` file (one locale directory).
+ *
+ * [diagnostics] is every non-fatal M5/K1 finding from this file, in document
+ * order (§2.7) -- errors never reach here, since [ConversionException] always
+ * unwinds the parse instead.
+ */
 internal data class ParsedFile(
     val filePath: String,
     val resources: List<ParsedResource>,
+    val diagnostics: List<Diagnostic> = emptyList(),
 )
