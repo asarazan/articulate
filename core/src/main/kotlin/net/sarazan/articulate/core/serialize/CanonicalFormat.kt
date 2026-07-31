@@ -26,10 +26,13 @@ object CanonicalFormat {
     /**
      * The catalog schema version Xcode writes.
      *
-     * PROVISIONAL — highest-priority fixture question. Xcode 26 is documented to
-     * have moved `1.0` → `1.1`; emitting the wrong one means Xcode rewrites the
-     * file on open, which defeats the entire drift gate. Do not guess this in
-     * production: the fixture decides it.
+     * STILL PROVISIONAL — the one value the 2026-07-31 verification could not
+     * settle. `xcstringstool sync` **preserves** whatever version the file already
+     * carries (`1.0` stays `1.0`, `1.1` stays `1.1`) rather than normalizing, so
+     * emitting `1.0` is at least stable against that tool. What a *newly created*
+     * Xcode catalog gets is still unknown, and Xcode 26 is documented to have
+     * moved `1.0` → `1.1`. Resolve by creating a String Catalog in Xcode and
+     * reading its version line — see `core/src/test/fixtures/xcode/README.md`.
      */
     const val VERSION: String = "1.0"
 
@@ -39,12 +42,12 @@ object CanonicalFormat {
     /** Constant on every string unit. Settled: translation state lives upstream. */
     const val STATE: String = "translated"
 
-    /** PROVISIONAL — two spaces per level. */
+    /** VERIFIED 2026-07-31 — two spaces per level. */
     const val INDENT: String = "  "
 
     /**
-     * PROVISIONAL — Xcode writes a *spaced* colon (`"key" : "value"`), which no
-     * standard JSON pretty-printer emits. This is the single most likely reason a
+     * VERIFIED 2026-07-31 — Xcode writes a *spaced* colon (`"key" : "value"`), which
+     * no standard JSON pretty-printer emits. This is the single most likely reason a
      * library-based serializer would fail the no-op check, and the reason the
      * writer here is hand-rolled.
      */
@@ -61,31 +64,42 @@ object CanonicalFormat {
      */
     val CHARSET: java.nio.charset.Charset = Charsets.UTF_8
 
-    /** PROVISIONAL — file ends with a newline. */
-    const val TRAILING_NEWLINE: Boolean = true
+    /**
+     * VERIFIED 2026-07-31 — **Xcode does NOT end the file with a newline.**
+     *
+     * This was provisionally `true` and was wrong. Apple's own `xcstringstool sync`
+     * rewrites a catalog ending at the final `}` (last byte `0x7d`), with no
+     * trailing `0x0a`. A single extra byte would make every generated catalog
+     * differ from what Xcode writes, so Xcode would rewrite it on open — defeating
+     * the entire drift gate this constant exists to support.
+     */
+    const val TRAILING_NEWLINE: Boolean = false
 
     /**
-     * PROVISIONAL, moderate confidence — Xcode appears to emit a blank line inside
-     * an empty object:
+     * VERIFIED 2026-07-31 — Xcode emits a blank line inside an empty object:
      * ```
      * "strings" : {
      *
      * }
      * ```
-     * rather than `{}`. Believed from observed catalogs but unverified; an empty
-     * `strings` object is worth including in the fixture explicitly.
+     * rather than `{}`. Confirmed against `xcstringstool sync` output, which
+     * rendered a keyless entry exactly this way.
      */
     const val BLANK_LINE_IN_EMPTY_OBJECT: Boolean = true
 
     /**
-     * PROVISIONAL — lowercase hex in `\uXXXX` escapes.
+     * VERIFIED 2026-07-31 — lowercase hex in `\uXXXX` escapes (`\u0001`, not
+     * `\u0001` uppercased). Also confirmed in the same run: non-ASCII is written
+     * as literal UTF-8 rather than escaped (`café`, `日本語`, even U+00A0 survive
+     * verbatim), and `\t` `\n` `\"` `\\` `\f` use their JSON shorthands.
      */
     const val LOWERCASE_HEX_ESCAPES: Boolean = true
 
     /**
      * Ordering for every object's members, at every level.
      *
-     * PROVISIONAL — UTF-16 code-unit ordinal, i.e. [naturalOrder]. This is
+     * VERIFIED 2026-07-31 — alphabetical at every level, matching UTF-16
+     * code-unit ordinal, i.e. [naturalOrder]. This is
      * deliberately *not* [String.compareTo] under a default locale and not any
      * collator: ordering must not vary with the machine's locale. The
      * "shuffled input produces identical bytes" and "Turkish locale produces

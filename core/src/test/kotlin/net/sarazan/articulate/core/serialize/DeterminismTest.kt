@@ -1,8 +1,8 @@
 package net.sarazan.articulate.core.serialize
 
 import org.junit.jupiter.api.Assertions.assertArrayEquals
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.util.Locale
 
@@ -45,10 +45,18 @@ class DeterminismTest {
     }
 
     @Test
-    fun `output ends with exactly one trailing newline`() {
-        val text = XcstringsWriter.write(TestCatalogs.sample())
-        assertFalse(text.endsWith("\n\n"))
-        assertTrue(text.endsWith("}\n"))
+    fun `output ends at the closing brace with no trailing newline`() {
+        // Verified 2026-07-31 against Apple's own `xcstringstool sync`, which
+        // rewrites a catalog ending at the final `}` with no trailing 0x0a.
+        // This was previously asserted the other way round and was wrong: one
+        // extra byte makes every generated catalog differ from what Xcode
+        // writes, so Xcode rewrites on open and the drift gate fights it forever.
+        val bytes = XcstringsWriter.writeBytes(TestCatalogs.sample())
+        assertEquals('}'.code.toByte(), bytes.last())
+        assertFalse(
+            String(bytes, CanonicalFormat.CHARSET).endsWith("\n"),
+            "Xcode does not terminate .xcstrings with a newline",
+        )
     }
 
     @Test
