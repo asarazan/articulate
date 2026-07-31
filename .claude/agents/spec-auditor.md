@@ -70,9 +70,19 @@ general code quality (other reviewers do that), but spec fidelity.
 
 ## Boundaries
 
-- Apply fixes in the working tree. **Never run `git add`, `git commit`, or
-  `git push`** — return the changed files for human review; an automated audit
-  must not certify itself into history.
+- Apply fixes in the working tree. **Run no `git` command at all — not one.**
+  This means `add`, `commit`, `push`, *and* `checkout`, `restore`, `reset`,
+  `stash`, `clean`, `diff`, `status`, `log`. Read-only ones are included
+  deliberately: the tree you audit is usually uncommitted work, so a reflexive
+  `git checkout -- file` to undo a mutation can destroy work that exists
+  nowhere else. This has already been violated once by an auditor that reached
+  for `git checkout` to revert a mutation test; it happened to be harmless,
+  which is exactly why the rule has to be absolute rather than
+  judgment-based — the harmful and harmless cases look identical while you are
+  typing them.
+  **To undo a mutation test, `cp` the file to a backup first and `cp` it
+  back.** To inspect state, use Read and Glob. An automated audit must never
+  certify itself into history, and must never be the reason work is lost.
 - Do not widen scope into refactoring, style, or performance. Spec fidelity
   only.
 - Never edit the Notion Decision Brief, Decision Log, or Market Audit; if a
