@@ -365,6 +365,20 @@ Typed task. Input: the strings tree (`@get:InputDirectory`, `@get:PathSensitive(
 
 Both are byte-deterministic via m1's `XcstringsWriter` and the same canonical rules, so re-running without source changes must produce identical bytes — that property is what makes §5's gate meaningful.
 
+#### Why one output is committed and the other isn't
+
+Recorded because it looks like an inconsistency and invites re-litigation; it was reviewed and upheld 2026-07-30. It is a Settled Decision in the brief ("Deliberate asymmetry with Android") — changing it requires a brief amendment and a Decision Log entry.
+
+**The asymmetry is downstream of a real one.** AGP is *inside* Gradle's build graph: `generateStrings` runs, resource merging consumes `build/generated/i18n/res`, `R.string` updates. Xcode is *outside* it — when a developer hits ⌘B, Gradle does not run, so the catalog must already exist on disk, which means it must be in the repo. One toolchain can pull from a build directory; the other cannot. That is the whole reason.
+
+**Lead with that reason, not with PR visibility.** The brief offers "PRs see copy changes" as a third justification. It is largely redundant — `strings.xml` is in the same PR and is the actual reviewable surface; the catalog diff is derived noise on top of it. The decision stands on the build-graph argument alone, and pairing a strong reason with a weak one just invites someone to attack the weak one and think they have won.
+
+**Alternatives, and what they cost.** *Commit neither* requires an Xcode "Run Script" phase shelling out to `./gradlew`, coupling every Xcode build to a working JVM and Gradle daemon, adding startup cost to every compile, and failing confusingly where the JDK isn't configured — precisely the toolchain coupling the no-runtime pitch exists to avoid. *Commit both* collides with a different settled decision: committing the Android res means abandoning `build/generated`, which forces either the forbidden `sourceSets["main"].res.srcDir` or fighting `addGeneratedSourceDirectory` (which wants a task output, not a tracked folder) — and buys merge conflicts on both platforms instead of one, for files AGP regenerates deterministically anyway.
+
+**The residual friction is real but narrow:** iOS needs an explicit generate-and-commit step Android doesn't, and that step is forgettable. §5's drift gate is not a patch over the asymmetry — it is what makes the asymmetry safe.
+
+**Merge conflicts in `Shared.xcstrings`: never hand-merge.** The file is fully derived, deterministic, and sorted, so conflict resolution is always the same — take either side, re-run `generateStrings`, commit the result. Document this in the README; a hand-merged catalog is the one way to get a file that no longer corresponds to any source.
+
 ### 4.5 Android variant wiring
 
 ```kotlin
