@@ -330,25 +330,90 @@ Exhaustive table test over every row above + property test: output always matche
 
 ---
 
-## 4. Milestone 4 — Gradle wiring (outline)
+## 4. Milestone 4 — Gradle wiring (full detail)
 
-- **Prerequisite (brief mandate):** read ListenUp's `listenup.localization.gradle.kts` (`ListenUpApp/ListenUp`, `tools/build-logic/convention/...`) before writing the shell — it encodes production configuration-cache and task-output lessons. First task of this milestone.
-- `:i18n` module: applies the source plugin; source at `src/main/strings/values-*/strings.xml`.
-- `generateStrings` task: `@InputDirectory` strings tree → two outputs: Android res tree under `build/generated/i18n/res` (per-locale `strings.xml`, normalized), and the committed `Shared.xcstrings` at a DSL-configured path in the iOS project tree.
-- Android consumption via `androidComponents.onVariants { variant.sources.res?.addGeneratedSourceDirectory(...) }` in the **app module** (settled; also dodges the AGP-9 KMP-library res question flagged in the brief).
-- Configuration-cache compatible from day one: no `Project` at execution time, Provider API throughout, TestKit test asserting `--configuration-cache` reuse.
-- Optional keys-only `commonMain` object generation (settled decision, small).
+### 4.1 Prerequisite — lessons from ListenUp (read 2026-07-30, brief mandate discharged)
 
-## 5. Milestone 5 — `verifyStrings` drift gate (outline)
+Read at `ListenUpApp/ListenUp`, `tools/build-logic/convention/src/main/kotlin/listenup.localization.gradle.kts` (148 lines). It is the same design hand-rolled in production, and its comments record failures already paid for. Seven lessons, each mapped to what we do:
 
-- Inputs-only task (no declared outputs / `doNotTrackState`) so it never goes UP-TO-DATE (settled).
-- Regenerates the catalog in memory, byte-compares against the committed file; failure message: exact path + "run `./gradlew generateStrings` and commit the result", plus a structural diff (added/removed/changed keys) from the §1.3 parser.
-- CI recipe documented: `./gradlew generateStrings && git diff --exit-code` *and/or* `verifyStrings` (equivalent guarantees; docs recommend one).
+| Their lesson (in their own words where quoted) | What we do |
+|---|---|
+| **"The old task declared no outputs"** — an explicit bug reference (their build #4). Fixed by declaring `inputs.dir` plus per-locale output dirs. | Declare inputs *and* outputs on `generateStrings` from the first commit. A task with no declared outputs cannot be up-to-date, cannot be cached, and silently re-runs forever. |
+| **Narrow the output declaration.** They declare the individual per-locale `values[-xx]/strings.xml` files rather than the parent dir, explicitly *"so it doesn't fight the Compose plugin's claim on the parent."* | Our Android output lives under `build/generated/i18n/res`, which no other plugin claims — but the principle holds: declare the narrowest accurate output, never a parent another plugin owns. |
+| **Overlapping inputs create phantom task dependencies.** Their `inputs.dir(iosSwiftDir)` made Gradle flag an undeclared dependency on `generateStrings`, because that tree *also* contains the generated catalog. Fixed with a filtered `fileTree(...) { include("**/*.swift") }`. | Directly relevant to m6's Swift lint: **never declare a directory input that contains a generated output.** Filter to the extensions actually read. |
+| **The drift gate declares inputs only, no outputs** — *"a gate that must always re-verify, never report UP-TO-DATE"*, justified as cheap because it is pure in-memory I/O. | Confirms §5's design independently. |
+| **Vacuous-gate guards.** Two `check(...)` calls whose messages both say *"the gate would pass vacuously"* — one if zero keys parsed, one if zero Swift files found. | Adopt wholesale, and note it is the same principle as our can't-fail-test rule, applied to a build gate: **a gate that finds nothing to check must fail loudly, not pass quietly.** |
+| **Error messages name the offending files relative to the root and state the exact fix command** (*"Run ./gradlew … and commit the result"*). | Matches §2.1's file/key/fix requirement; reuse the wording shape. |
+| **The logic lives in real, unit-tested classes on the build-logic classpath; the script is "the thin Gradle shell."** Task actions capture only those objects plus `File`s — *"never the script's `Project`, keeping the tasks configuration-cache compatible."* | Independent confirmation of D1's `core`/`plugin` split. Our `plugin` module stays a shell over `core`. |
+
+**Where we deliberately improve on it.** Their tasks are untyped `tasks.register("name") { … doLast { } }` with imperatively-declared inputs. We use **typed task classes with annotated properties** (`@get:InputDirectory`, `@get:OutputDirectory`, `@get:Input`), which the configuration cache and incremental build understand far better, and which let us set `@get:PathSensitive`. Their approach works but leaves correctness to discipline; annotations let the toolchain enforce it.
+
+### 4.2 Plugin structure (D10 — two IDs)
+
+- **`net.sarazan.articulate`** — applied to `:i18n`. Owns source discovery, `generateStrings`, `verifyStrings`, the extension, and the optional `commonMain` keys object. **No AGP on its classpath.**
+- **`net.sarazan.articulate.android`** — applied to the Android **app** module. Its only job is variant res wiring. Depends on AGP (`compileOnly`, pinned to the D9 floor of AGP 8.5.2 so we cannot accidentally use a newer API).
+
+### 4.3 Source contract
+
+`:i18n` sources live at `src/main/strings/values-*/strings.xml` (settled). The plugin resolves that as a `DirectoryProperty` with a convention, overridable via the extension. Locale directory names are mapped by `AndroidLocaleMapper` (m3) — the plugin does **not** re-derive locale semantics.
+
+### 4.4 `generateStrings`
+
+Typed task. Input: the strings tree (`@get:InputDirectory`, `@get:PathSensitive(RELATIVE)`). Outputs, per the open decision in §4.8:
+- Android res tree under `build/generated/i18n/res` — per-locale `values*/strings.xml`, normalized and deterministic.
+- The committed `Shared.xcstrings` at a DSL-configured path in the iOS project tree.
+
+Both are byte-deterministic via m1's `XcstringsWriter` and the same canonical rules, so re-running without source changes must produce identical bytes — that property is what makes §5's gate meaningful.
+
+### 4.5 Android variant wiring
+
+```kotlin
+androidComponents.onVariants { variant ->
+    variant.sources.res?.addGeneratedSourceDirectory(taskProvider, GenerateStringsTask::androidResDir)
+}
+```
+
+Applied in the **app** module (settled). This also sidesteps the brief's AGP-9 concern — `com.android.library` + KMP is deprecated in AGP 9 with removal expected around AGP 10, and whether `com.android.kotlin.multiplatform.library` supports `res` is unverified. Registering generated res in the app module avoids depending on that answer entirely.
+
+Never write into `src/*/res`; never use the legacy `sourceSets["main"].res.srcDir` (both settled).
+
+### 4.6 Configuration-cache rules — non-negotiable, and the reason M4's audit is Opus
+
+Config-cache violations are the archetypal silent failure: everything works until someone enables the cache, then breaks confusingly and far from the cause.
+
+- No `Project` reference at execution time. Capture values into task properties at configuration time.
+- `Provider`/`Property` throughout; no eager `.get()` during configuration.
+- No `project.file(...)`, `rootProject`, or `Task.project` inside a task action.
+- Task actions may reference only `core` types (pure Kotlin, no Gradle API) and captured serializable values.
+- A TestKit test asserts `--configuration-cache` produces `Configuration cache entry reused.` on the second run — not merely that the build succeeds.
+
+### 4.7 Diagnostics wiring (§2.7 + D10's `warningsAsErrors`)
+
+`convert()` returns `ConversionResult(catalog, diagnostics)`. The task logs each diagnostic at `WARN` with its file, key, and message. When `warningsAsErrors = true` (default `false`), any diagnostic fails the task with a message listing every offender — not just the first, so one build surfaces the whole set.
+
+### 4.8 Tests
+
+Tier 2 of D2: TestKit functional tests for task wiring, up-to-dateness (second run is `UP-TO-DATE`), config-cache reuse, and `warningsAsErrors` behavior. Tier 3: the `sample/` composite build as an end-to-end smoke.
+
+**Open decision — one task or two?** `generateStrings` currently writes both outputs, matching ListenUp. But the two have genuinely different lifecycles: the Android res tree is a disposable build artifact under `build/`, while `Shared.xcstrings` is a **committed** file that should change only when strings change. Splitting into `generateAndroidRes` + `generateXcstrings` (with `generateStrings` as an aggregate) gives each accurate up-to-date semantics and lets CI regenerate only the committed artifact; keeping one task is simpler and makes divergence between the two outputs structurally impossible. **Needs a ruling before implementation.**
+
+## 5. Milestone 5 — `verifyStrings` drift gate (full detail)
+
+**Inputs-only task, no declared outputs**, so it never reports UP-TO-DATE (settled — and independently confirmed by ListenUp's production gate, which carries the same design with the comment *"a gate that must always re-verify"*, justified because it is pure in-memory I/O and therefore cheap to repeat).
+
+Behavior: regenerate in memory, byte-compare against the committed artifact(s). On drift, fail with the exact path, the fix command (`./gradlew generateStrings` and commit the result), and — beyond ListenUp's version — a structural diff naming added, removed, and changed keys, which requires `XcstringsReader` (§1.3, still unwritten and parked on the Xcode fixture). **If the reader is not ready when m5 lands, ship the byte-compare and file-list without the structural diff rather than blocking the gate**; the diff is a diagnostic nicety, the gate is the guarantee.
+
+**Vacuous-gate guard (adopted from ListenUp).** If the source tree yields zero keys, or the committed catalog is absent where one is expected, the gate must **fail loudly** rather than pass. A drift gate that silently verifies nothing is worse than no gate, because it manufactures confidence. Same principle as the can't-fail-test rule, applied to the build.
+
+CI recipe documented: `./gradlew generateStrings && git diff --exit-code`, *or* `verifyStrings` — equivalent guarantees, docs recommend one to avoid teams running both and wondering which is authoritative.
 
 ## 6. Milestone 6 — Swift key-parity lint (outline)
 
-- Scan `.swift` sources for statically resolvable references to the generated table (`.Shared.someKey`, `String(localized:table:)` literals); fail the build if a referenced key is absent from source XML (iOS renders missing keys as raw key text with no error anywhere — the brief's rationale).
-- Regex/heuristic scanner in `core`, task shell in `plugin`; documented limitations (dynamic keys invisible). Ships after v0 per scope proposal (D7).
+- Fail the build if Swift references a key absent from source XML. Rationale (brief): iOS renders a missing key as its own raw text, so it ships as visible garbage with nothing red anywhere. ListenUp's production comment confirms this failure mode *and* adds one the plan had not recorded: **Xcode hides the problem locally** by scraping Swift and writing missing keys back into the generated catalog as empty entries — so a developer's machine looks fine while CI and shipped builds are wrong.
+- **Re-spec before implementing.** The plan currently proposes a regex/heuristic scanner. Research found `xcstringstool generate-symbols --language swift --output-directory <dir> <file>` emits the actual symbols Xcode generates — driving the lint off that is *exact* rather than heuristic. Decide which before writing the scanner.
+- Task input must be a **filtered** `fileTree(...) { include("**/*.swift") }`, never the enclosing directory — ListenUp hit exactly this: declaring the whole iOS source dir created a phantom undeclared dependency on `generateStrings`, because that tree also holds the generated catalog.
+- Adopt the vacuous-gate guards verbatim: zero known keys, or zero Swift files found, must fail rather than pass.
+- Ships after v0 per D7.
 
 ---
 
