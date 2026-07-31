@@ -4,6 +4,7 @@ import net.sarazan.articulate.core.convert.MarkupPolicy
 import net.sarazan.articulate.gradle.tasks.GenerateAndroidResTask
 import net.sarazan.articulate.gradle.tasks.GenerateXcstringsTask
 import net.sarazan.articulate.gradle.tasks.VerifyStringsTask
+import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 
@@ -35,6 +36,26 @@ class ArticulatePlugin : Plugin<Project> {
         extension.markupPolicy.convention(MarkupPolicy.ERROR)
         extension.warningsAsErrors.convention(false)
         extension.ios.table.convention("Shared")
+
+        // Task 4 correctness fix (PLAN.md §13's M4/M5 audit): STRIP/VERBATIM
+        // are declared DSL surface (D4) but core always behaves as ERROR
+        // regardless of what's set -- silently. A user who asks for STRIP and
+        // gets ERROR-shaped behavior with no diagnostic is exactly the "95%
+        // right is worse than none" hazard the brief forbids. afterEvaluate,
+        // not read eagerly here, so this observes whatever the consumer's own
+        // `articulate { markupPolicy = ... }` block (which runs after this
+        // apply()) actually set -- reading extension.markupPolicy.get() here
+        // instead would only ever see the ERROR convention just above.
+        project.afterEvaluate {
+            val policy = extension.markupPolicy.get()
+            if (policy != MarkupPolicy.ERROR) {
+                throw GradleException(
+                    "net.sarazan.articulate: markupPolicy = $policy is not yet implemented -- only " +
+                        "MarkupPolicy.ERROR is supported in v0. See PLAN.md §2.2's D4 ruling. Remove the " +
+                        "markupPolicy override or set it to MarkupPolicy.ERROR.",
+                )
+            }
+        }
 
         val generateAndroidRes = project.tasks.register("generateAndroidRes", GenerateAndroidResTask::class.java) { task ->
             task.group = ARTICULATE_TASK_GROUP

@@ -1,7 +1,7 @@
 package net.sarazan.articulate.gradle
 
 import net.sarazan.articulate.gradle.FunctionalTestSupport.GRADLE_FLOOR_VERSION
-import net.sarazan.articulate.gradle.FunctionalTestSupport.findAndroidSdk
+import net.sarazan.articulate.gradle.FunctionalTestSupport.requireOrSkipAndroidSdk
 import net.sarazan.articulate.gradle.FunctionalTestSupport.writeAndroidAppModule
 import net.sarazan.articulate.gradle.FunctionalTestSupport.writeAndroidSettings
 import net.sarazan.articulate.gradle.FunctionalTestSupport.writeBaseBuildFile
@@ -12,7 +12,6 @@ import org.gradle.testkit.runner.TaskOutcome
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
-import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -35,9 +34,13 @@ import java.nio.file.Path
  *    default install location) and [FunctionalTestSupport.writeLocalProperties]
  *    writes it into every fixture explicitly, making these tests
  *    self-contained and portable to CI rather than tied to one machine's
- *    shell config. If no SDK is found anywhere, [setUp] skips loudly via
- *    `Assumptions.assumeTrue` with a message naming exactly what was
- *    checked -- never a silent pass.
+ *    shell config. If no SDK is found anywhere, [setUp] delegates to
+ *    [FunctionalTestSupport.requireOrSkipAndroidSdk]: a loud skip locally
+ *    (via `Assumptions.assumeTrue`, message naming exactly what was checked),
+ *    or a hard failure when `ARTICULATE_REQUIRE_ANDROID_SDK=true` (CI always
+ *    sets this) -- a green CI run that silently skipped this whole class
+ *    would have tested nothing, which is precisely the failure mode that env
+ *    var exists to convert into a loud one.
  *  - AGP 8.5.2 (D9's floor) is not verified against this repo's *building*
  *    Gradle (9.5.0) -- AGP's own compatibility table pairs 8.5.x with Gradle
  *    8.7-8.9, and `compileSdk 34` is the ceiling AGP 8.5 supports (not "tested
@@ -72,14 +75,8 @@ class AndroidWiringFunctionalTest {
 
     @BeforeEach
     fun setUp() {
-        val sdk = findAndroidSdk()
-        assumeTrue(
-            sdk != null,
-            "No Android SDK found (checked ANDROID_HOME, ANDROID_SDK_ROOT, and " +
-                "~/Library/Android/sdk) -- skipping AndroidWiringFunctionalTest. Install " +
-                "an SDK (platforms + build-tools) to exercise this coverage.",
-        )
-        writeLocalProperties(projectDir, sdk!!)
+        val sdk = requireOrSkipAndroidSdk()
+        writeLocalProperties(projectDir, sdk)
     }
 
     private fun androidRunner(vararg args: String): GradleRunner =

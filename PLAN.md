@@ -383,7 +383,19 @@ i18n/build/generated/i18n/res/                                      ← does not
 
 So the output lands in the **consuming app project's** build directory, in a folder named after the task. Google's own "Extend AGP" page states the opposite — that the plugin author sets the output directory — which observation contradicts. That is the second time in this project a Google documentation claim has failed against a real tool run (the first was whitespace collapsing, `docs/CONVERSIONS.md` W3); the standing rule applies, **observation wins over documentation**.
 
-Consequences worth holding onto: the task's own output convention is effectively dead code under variant wiring, so do not reason about it when debugging; and any user-facing documentation of "where do the generated Android resources go" must name the app module's build dir, not `:i18n`'s.
+**AMENDED 2026-07-31 — the behavior is AGP-version-dependent, and the note above was over-general.** Building the same fixture under **AGP 9.1** shows the opposite: no `app/build/generated/res` directory is created at all, and the files stay put at `i18n/build/generated/i18n/res/values*/strings.xml`. AGP 9.1 reads the Variant-API-registered directory **in place** rather than relocating it.
+
+| AGP | where the generated res lands |
+|---|---|
+| **8.5.2** (D9 floor) | relocated to `app/build/generated/res/generateAndroidRes/` |
+| **9.1** (D9 upper cell) | stays at `i18n/build/generated/i18n/res/` |
+
+Both are verified by dedicated functional tests that assert the correct location **and** the absence of the other, so a future AGP bump that changes this again fails loudly rather than drifting silently.
+
+Consequences, corrected:
+- **The task's own output convention is not dead code.** An earlier revision of this section said it was, reasoning only from AGP 8.5.2. Under AGP 9.1 that convention is exactly where the files live.
+- **Never hardcode either path.** Anything that needs the location must read it from the task's `androidResDir` property after AGP has had its say.
+- **User-facing documentation must be version-aware**, or say nothing more specific than "under your build directory" — a single stated path would be wrong for half the supported range.
 
 Both are byte-deterministic via m1's `XcstringsWriter` and the same canonical rules, so re-running without source changes must produce identical bytes — that property is what makes §5's gate meaningful.
 
@@ -710,14 +722,16 @@ Not a warning — a build failure, reproduced on both `:app:help` and a real com
 
 ### Correctness items from the M4/M5 audit
 
-- **`markupPolicy` silently no-ops.** Setting `STRIP` or `VERBATIM` produces `ERROR` behavior with no diagnostic. Spec-conformant per D4 (the knob ships in v0, implementations deferred) — but a user who asks for `STRIP` and silently gets `ERROR` is exactly the "95% right is worse than none" hazard the brief forbids. **Recommend failing fast on any non-`ERROR` value until implemented**, which is a few lines and converts a silent surprise into a clear one.
+- ~~`markupPolicy` silently no-ops~~ — **closed 2026-07-31.** Any non-`ERROR` value now fails at configuration time, naming the value, stating that only `ERROR` ships in v0, and pointing at D4.
 - **Applying both plugins to one module** dies with a raw `org.gradle.api.CircularReferenceException` naming nothing about Articulate — a violation of §4.1 lesson 6 (messages must name the problem and the fix). One-line guard: `if (i18nProjectPath != project.path) project.evaluationDependsOn(i18nProjectPath)`.
 - **`GenerateXcstringsTask`'s "ios catalog not configured" error is unreachable.** `xcstringsFile` is `@OutputFile` without `@Optional`, so Gradle's own property validation fires first with a generic message. Either mark it `@Optional` so the helpful error can run, or delete the dead branch. `VerifyStringsTask`'s equivalent guard *does* fire, because it uses `@Internal`.
 
 ### Infrastructure gaps
 
-- **There is no CI configuration in the repo at all.** D9's matrix therefore exists only on paper: the Gradle 8.7 floor is exercised by a functional test, but the **AGP 9.1 upper cell has never run**. CI also needs `ANDROID_HOME` and SDK Platform 34 (AGP 8.5's maximum `compileSdk`), plus Gradle's `wrapper-validation` action per §E6.
-- **`gradleFloor = "8.7"` in `libs.versions.toml` is unreferenced.** Its comment claims a functional test runs under it; the test uses its own constant. Two sources of truth for one number — collapse them.
+- ~~No CI configuration~~ — **closed 2026-07-31.** `.github/workflows/ci.yml`: wrapper validation, `:core:test`, `:plugin:test`, and a gate job requiring all three. Everything runs on Linux; nothing in the suite needs Xcode, and macOS runners cost ~10× for no benefit. **`ARTICULATE_REQUIRE_ANDROID_SDK=true` is set for the plugin job**, so a missing SDK fails the build instead of silently skipping the five Android tests — a green build can no longer mean "tested nothing".
+- ~~AGP 9.1 cell never run~~ — **closed 2026-07-31, and it found something.** The cell is real (separate `PluginUnderTestMetadata` resolving AGP 9.1 into its own classpath, avoiding collision with the 8.5.2 floor). It runs under the repo's own Gradle 9.5.0, which satisfies AGP 9.1's ≥9.3.1 requirement. It immediately surfaced the version-dependent output-relocation behavior now recorded in §4.4 — a claim the floor cell alone would have kept wrong.
+- ~~`gradleFloor` unreferenced~~ — **closed 2026-07-31**; the dead catalog entry was removed, leaving `FunctionalTestSupport.GRADLE_FLOOR_VERSION` as the single source.
+- **Still open: the workflow has never actually executed.** Everything checkable locally was checked — YAML parses, `actionlint` clean, all action versions and both SDK package IDs verified against live manifests (note it is `platforms;android-37.0`, not `android-37`). What awaits a first real run: SDK installation on a hosted runner, network behavior, and the job graph end to end.
 
 ### Spec gap
 

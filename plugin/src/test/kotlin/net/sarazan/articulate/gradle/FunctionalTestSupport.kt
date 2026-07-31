@@ -1,6 +1,7 @@
 package net.sarazan.articulate.gradle
 
 import org.gradle.testkit.runner.GradleRunner
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import java.io.File
 import java.nio.file.Path
 
@@ -109,6 +110,52 @@ internal object FunctionalTestSupport {
     const val COMPILE_SDK = 34
 
     /**
+     * Task 3 / D9's upper matrix cell (PLAN.md §E2): the AGP version
+     * `plugin/build.gradle.kts`'s `agp91TestKitClasspath` resolves. Unlike
+     * [AGP_VERSION], this one *is* the source of truth (there is no separate
+     * fixture-side pin to drift from it) -- [agp91PluginClasspath] reads the
+     * classpath that configuration produced directly.
+     */
+    const val AGP_91_VERSION = "9.1.0"
+
+    /** `compileSdk`/`targetSdk` for the AGP 9.1 cell -- the max it supports (table in the task brief, verified from Android's release notes). */
+    const val COMPILE_SDK_AGP_91 = 37
+
+    /**
+     * Reads the TestKit plugin classpath [AndroidWiringAgp91FunctionalTest]
+     * runs against -- AGP 9.1.0 instead of the [AGP_VERSION] floor every
+     * other functional test gets from the default,
+     * classpath-resource-based `GradleRunner.withPluginClasspath()`.
+     *
+     * `plugin/build.gradle.kts`'s `agp91PluginUnderTestMetadata` task (a
+     * second, independent `PluginUnderTestMetadata`) resolves
+     * `com.android.tools.build:gradle:9.1.0` into its own classpath and
+     * writes it to its own output file -- deliberately *not* added to any
+     * source set's resources, so it can never collide with the default
+     * `plugin-under-test-metadata.properties` on the `test` classpath (which
+     * is what makes the no-arg `.withPluginClasspath()` resolve to AGP
+     * 8.5.2 for every other test in this source set). That file's absolute
+     * path is handed to this JVM via the `articulate.agp91PluginUnderTestMetadata`
+     * system property, set by `tasks.test` in the build file; this function
+     * reads it, parses its `implementation-classpath` entry, and returns a
+     * classpath [AndroidWiringAgp91FunctionalTest] passes explicitly to
+     * `GradleRunner.withPluginClasspath(List<File>)`.
+     */
+    fun agp91PluginClasspath(): List<File> {
+        val propsPath = System.getProperty("articulate.agp91PluginUnderTestMetadata")
+            ?: error(
+                "system property articulate.agp91PluginUnderTestMetadata is not set -- " +
+                    "AndroidWiringAgp91FunctionalTest must run via `./gradlew :plugin:test` " +
+                    "(see the systemProperty wiring on tasks.test in plugin/build.gradle.kts), not directly.",
+            )
+        val propsFile = File(propsPath)
+        val props = java.util.Properties().apply { propsFile.inputStream().use { load(it) } }
+        val classpath = props.getProperty("implementation-classpath")
+            ?: error("expected key 'implementation-classpath' in $propsFile, found: ${props.keys}")
+        return classpath.split(File.pathSeparator).map(::File)
+    }
+
+    /**
      * Locates a real Android SDK the way a developer's machine actually has
      * one -- `ANDROID_HOME`, then `ANDROID_SDK_ROOT`, then this machine's
      * default install path -- and never relies on the ambient shell
@@ -127,6 +174,67 @@ internal object FunctionalTestSupport {
         )
         return candidates.map(::File).firstOrNull { it.isDirectory && File(it, "platforms").isDirectory }
     }
+
+    /**
+     * The strictness switch (PLAN.md §13 infra gap). On a fresh CI runner
+     * with no SDK, [findAndroidSdk] returning `null` used to be indistinguishable
+     * from "developer machine with no SDK installed" -- both silently skipped
+     * via `Assumptions.assumeTrue`, so a CI run that never had an SDK in the
+     * first place still went green while testing none of [AndroidWiringFunctionalTest].
+     * That is exactly the "invisible corpus" failure mode this project has
+     * repeatedly found (assertions/skips satisfied by their own absence).
+     *
+     * Set to `"true"` (case-insensitive), a missing SDK becomes a hard failure
+     * instead of a skip -- CI sets this always (see the workflow). Left unset,
+     * local runs keep skipping, so a contributor without an SDK installed
+     * isn't blocked. See [resolveRequiredAndroidSdk] for the actual branching
+     * logic, kept separate and pure so it's unit-testable without needing to
+     * fake environment variables or a real filesystem.
+     */
+    const val REQUIRE_ANDROID_SDK_ENV = "ARTICULATE_REQUIRE_ANDROID_SDK"
+
+    /**
+     * Pure decision logic for [REQUIRE_ANDROID_SDK_ENV], factored out of
+     * [requireOrSkipAndroidSdk] specifically so it can be unit-tested (see
+     * `FunctionalTestSupportTest`) without touching real environment
+     * variables or the filesystem -- both [sdk] and [requireEnvValue] are
+     * plain parameters here, not read from `System` directly.
+     *
+     *  - [sdk] non-null: returned as-is; the env var is irrelevant when an
+     *    SDK was actually found.
+     *  - [sdk] null and [requireEnvValue] is `"true"` (case-insensitive):
+     *    throws [IllegalStateException] naming [REQUIRE_ANDROID_SDK_ENV] and
+     *    the locations checked -- a hard failure, never a silent skip.
+     *  - [sdk] null and anything else (including unset): aborts the current
+     *    test via `Assumptions.assumeTrue`, i.e. a clean, loud skip -- never
+     *    silent, since the message names exactly what was checked and how to
+     *    make it strict instead.
+     */
+    fun resolveRequiredAndroidSdk(sdk: File?, requireEnvValue: String?): File {
+        if (sdk != null) return sdk
+        val checked = "ANDROID_HOME, ANDROID_SDK_ROOT, and ~/Library/Android/sdk"
+        if (requireEnvValue?.equals("true", ignoreCase = true) == true) {
+            throw IllegalStateException(
+                "No Android SDK found (checked $checked). $REQUIRE_ANDROID_SDK_ENV=true requires one to " +
+                    "be present -- install an SDK with platforms + build-tools and point ANDROID_HOME or " +
+                    "ANDROID_SDK_ROOT at it.",
+            )
+        }
+        assumeTrue(
+            false,
+            "No Android SDK found (checked $checked) -- skipping. Set $REQUIRE_ANDROID_SDK_ENV=true to " +
+                "make this a hard failure instead of a skip (CI always does).",
+        )
+        error("unreachable: Assumptions.assumeTrue(false, ...) always throws")
+    }
+
+    /**
+     * [findAndroidSdk] plus [resolveRequiredAndroidSdk]'s strictness switch,
+     * reading the real environment. The one entry point functional tests
+     * should call from `@BeforeEach`.
+     */
+    fun requireOrSkipAndroidSdk(): File =
+        resolveRequiredAndroidSdk(findAndroidSdk(), System.getenv(REQUIRE_ANDROID_SDK_ENV))
 
     /**
      * Writes `local.properties` into a TestKit fixture pointing at [sdkDir].

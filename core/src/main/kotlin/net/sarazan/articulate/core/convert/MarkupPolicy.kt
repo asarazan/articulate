@@ -10,7 +10,9 @@ package net.sarazan.articulate.core.convert
  * plan, `VERBATIM` unscheduled). [AndroidToXcstringsConverter] always behaves
  * as [ERROR] today; there is deliberately no parameter wiring this in yet,
  * since adding one before a second policy exists would be speculative API
- * surface with no caller.
+ * surface with no caller. `plugin`'s `ArticulatePlugin` fails the build fast
+ * at configuration time if a consumer sets anything other than [ERROR], so
+ * this gap is never reached silently -- see `ArticulateExtension.markupPolicy`.
  */
 enum class MarkupPolicy {
     /** Hard error on any real span (default, and the only implemented behavior). */

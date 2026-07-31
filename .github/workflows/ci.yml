@@ -1,0 +1,155 @@
+name: CI
+
+# PLAN.md §13's infra gap: there was no CI configuration in this repo at
+# all, so D9's matrix (§E2) existed only on paper. This workflow is the fix.
+#
+# Everything runs on Linux (ubuntu-latest) -- the Android SDK and AGP work
+# fine there, and no test in this repo needs Xcode (`xcstringstool` is only
+# used for manual fixture verification, never by the suite). A macOS runner
+# would cost roughly 10x for no benefit here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel a superseded run on the same ref (e.g. a second push to an open PR)
+# instead of letting both run to completion.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # §E6: "committing gradle-wrapper.jar is standard Gradle practice; CI adds
+  # Gradle's wrapper-validation check to guard its integrity." A committed
+  # wrapper jar with nothing verifying it is a supply-chain gap.
+  #
+  # Note: gradle/actions/setup-gradle@v4+ also validates the wrapper on every
+  # execution (see its docs), so the core-test/plugin-test jobs below get a
+  # second, redundant check for free. This job stays anyway: it's the
+  # explicit, fast-failing, unambiguously-named gate §E6 asks for, and it
+  # gates the other two jobs so a tampered wrapper never gets as far as
+  # downloading a JDK or an Android SDK.
+  wrapper-validation:
+    name: Validate Gradle wrapper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: gradle/actions/wrapper-validation@v6
+
+  # :core:test -- 196 tests (PLAN.md §D2/§E3 tier 1: unit + golden corpus),
+  # pure Kotlin, zero Gradle API surface (D1), no Android SDK needed.
+  core-test:
+    name: "core:test"
+    needs: wrapper-validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run :core:test
+        run: ./gradlew :core:test --stacktrace
+
+      - name: Upload :core test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: core-test-report
+          path: core/build/reports/tests/test
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # :plugin:test -- PLAN.md §D2/§E3 tier 2 (TestKit functional tests), plus
+  # D9's whole matrix in one invocation:
+  #  - The floor cell (AGP 8.5.2 / Gradle 8.7, compileSdk 34) via
+  #    GradleFloorFunctionalTest and AndroidWiringFunctionalTest, which pin
+  #    Gradle 8.7 with GradleRunner.withGradleVersion(...).
+  #  - The upper cell (AGP 9.1.0, compileSdk 37, this repo's own wrapper
+  #    9.5.0 which satisfies AGP 9.1's Gradle >= 9.3.1 requirement) via
+  #    AndroidWiringAgp91FunctionalTest, which builds its own explicit
+  #    TestKit plugin classpath (see FunctionalTestSupport.agp91PluginClasspath
+  #    and plugin/build.gradle.kts) rather than using the default one, which
+  #    stays pinned to the floor for every other test.
+  # Both cells need their own SDK platform + build-tools; both are installed
+  # below. ARTICULATE_REQUIRE_ANDROID_SDK=true (Task 1's strictness switch,
+  # PLAN.md §13) turns a missing SDK into a hard failure instead of a silent
+  # skip -- a green run here that quietly skipped every Android test would
+  # have tested nothing, which is exactly the failure mode that env var
+  # exists to convert into a loud one.
+  plugin-test:
+    name: "plugin:test"
+    needs: wrapper-validation
+    runs-on: ubuntu-latest
+    env:
+      ARTICULATE_REQUIRE_ANDROID_SDK: "true"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          # platforms;android-34 + build-tools;34.0.0: AGP 8.5.2's maximum
+          #   supported compileSdk -- D9's floor cell (PLAN.md §E2). Not a
+          #   preference; a higher compileSdk here would test a
+          #   configuration no floor consumer can actually run.
+          # platforms;android-37.0 + build-tools;36.0.0: AGP 9.1's cell --
+          #   verified against Google's live SDK repository manifest that
+          #   `platforms;android-37.0` (not `platforms;android-37`) is the
+          #   real published package id.
+          packages: >-
+            platform-tools
+            platforms;android-34
+            platforms;android-37.0
+            build-tools;34.0.0
+            build-tools;36.0.0
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run :plugin:test
+        run: ./gradlew :plugin:test --stacktrace
+
+      - name: Upload :plugin test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: plugin-test-report
+          path: plugin/build/reports/tests/test
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # Single required status check for branch protection: green only if every
+  # job above actually succeeded (not merely "didn't error"), so a
+  # skipped/cancelled job can't masquerade as passing CI.
+  ci:
+    name: CI
+    if: always()
+    needs: [wrapper-validation, core-test, plugin-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all jobs to have succeeded
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ] \
+            || [ "${{ contains(needs.*.result, 'cancelled') }}" = "true" ] \
+            || [ "${{ contains(needs.*.result, 'skipped') }}" = "true" ]; then
+            echo "One or more required jobs did not succeed:"
+            echo "${{ toJSON(needs) }}"
+            exit 1
+          fi

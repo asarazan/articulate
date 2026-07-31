@@ -192,4 +192,69 @@ class GenerateTasksFunctionalTest {
             )
         }
     }
+
+    /**
+     * Task 4 (PLAN.md §13's M4/M5 audit): D4 ships the `markupPolicy` knob in
+     * v0 with only `ERROR` implemented -- setting `STRIP`/`VERBATIM` used to
+     * silently behave as `ERROR` anyway, with no diagnostic. This asserts the
+     * fail-fast replacement: the build fails at configuration time (before
+     * any task executes) and the message names the value, that only `ERROR`
+     * is supported, and PLAN.md §2.2/D4.
+     */
+    @Test
+    fun `markupPolicy set to STRIP fails fast at configuration time`() {
+        writeBaseBuildFile(
+            projectDir,
+            extraConfig = "markupPolicy = net.sarazan.articulate.core.convert.MarkupPolicy.STRIP",
+        )
+
+        val result = runner(projectDir, "help").buildAndFail()
+
+        assertTrue(
+            result.output.contains("markupPolicy") &&
+                result.output.contains("STRIP") &&
+                result.output.contains("not yet implemented") &&
+                result.output.contains("MarkupPolicy.ERROR") &&
+                result.output.contains("D4"),
+            "expected a fail-fast message naming the value, ERROR as the only supported one, and D4:\n${result.output}",
+        )
+        // No task should have even started -- this must fail during
+        // configuration, not merely as a side effect of some task's action.
+        assertFalse(result.output.contains("BUILD SUCCESSFUL"))
+    }
+
+    /**
+     * VERBATIM must fail the same way as STRIP -- both are unimplemented,
+     * and this test exists specifically so "only STRIP is special-cased"
+     * cannot creep in unnoticed (mutate-and-observe, performed by hand:
+     * hardcoding the check to `policy == MarkupPolicy.STRIP` instead of
+     * `!= MarkupPolicy.ERROR` passes the test above but fails this one).
+     */
+    @Test
+    fun `markupPolicy set to VERBATIM also fails fast`() {
+        writeBaseBuildFile(
+            projectDir,
+            extraConfig = "markupPolicy = net.sarazan.articulate.core.convert.MarkupPolicy.VERBATIM",
+        )
+
+        val result = runner(projectDir, "help").buildAndFail()
+
+        assertTrue(
+            result.output.contains("VERBATIM") && result.output.contains("not yet implemented"),
+            "expected VERBATIM to fail fast exactly like STRIP:\n${result.output}",
+        )
+    }
+
+    /**
+     * The default (`ERROR`, unset) must keep working -- this is the
+     * companion negative case proving the two tests above are actually
+     * caused by the non-default value, not by `writeBaseBuildFile`'s
+     * `extraConfig` mechanism itself or some other regression.
+     */
+    @Test
+    fun `markupPolicy left at its default ERROR does not fail fast`() {
+        val result = runner(projectDir, "help").build()
+
+        assertTrue(result.output.contains("BUILD SUCCESSFUL"))
+    }
 }

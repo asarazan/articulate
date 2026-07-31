@@ -44,7 +44,10 @@ abstract class ArticulateExtension @Inject constructor(objects: ObjectFactory) {
      * is deliberately no parameter wiring this in yet, since adding one
      * before a second policy exists would be speculative API surface with no
      * caller"). Setting anything other than the default [MarkupPolicy.ERROR]
-     * currently has no effect; `core` always behaves as `ERROR`.
+     * fails the build fast at configuration time (see [ArticulatePlugin.apply])
+     * rather than silently behaving as `ERROR` anyway -- a user who asks for
+     * `STRIP` and silently gets `ERROR` is exactly the "95% right is worse
+     * than none" hazard the brief forbids.
      */
     abstract val markupPolicy: Property<MarkupPolicy>
 

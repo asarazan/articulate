@@ -30,6 +30,20 @@ val agpTestKitClasspath: Configuration by configurations.creating {
     isCanBeConsumed = false
 }
 
+// Task 3 / D9's upper matrix cell (PLAN.md §E2): AGP 9.1, never previously
+// exercised anywhere. Deliberately a *separate* configuration from
+// agpTestKitClasspath above, not an additional dependency on it -- putting
+// both AGP 8.5.2 and 9.1.0 on the same classpath would load conflicting
+// copies of the same classes with an arbitrary winner. AndroidWiringAgp91FunctionalTest
+// builds its own explicit TestKit plugin classpath from this at runtime
+// (see agp91PluginUnderTestMetadata below) instead of using the default,
+// classpath-resource-based GradleRunner.withPluginClasspath() that every
+// other functional test relies on -- that default is permanently pinned to
+// AGP 8.5.2 via agpTestKitClasspath/pluginUnderTestMetadata, the floor cell.
+val agp91TestKitClasspath: Configuration by configurations.creating {
+    isCanBeConsumed = false
+}
+
 dependencies {
     implementation(project(":core"))
     compileOnly(libs.android.gradle.plugin)
@@ -41,6 +55,12 @@ dependencies {
     testRuntimeOnly(libs.junit.platform.launcher)
 
     agpTestKitClasspath(libs.android.gradle.plugin)
+    // Pinned literally, not via the version catalog: libs.versions.toml's
+    // `agp` is D9's floor (8.5.2, compileOnly-pinned so `plugin` can't
+    // accidentally compile against a newer API) -- this is the *other*
+    // matrix cell, used only for the TestKit fixture classpath below, never
+    // for compilation.
+    agp91TestKitClasspath("com.android.tools.build:gradle:9.1.0")
 }
 
 gradlePlugin {
@@ -81,6 +101,23 @@ tasks.named<PluginUnderTestMetadata>("pluginUnderTestMetadata") {
     pluginClasspath.from(agpTestKitClasspath)
 }
 
+// Task 3's AGP 9.1 cell: a second, independent PluginUnderTestMetadata task
+// (own name, own output directory) so its properties file never collides
+// with the default `pluginUnderTestMetadata` above on any classpath --
+// AndroidWiringAgp91FunctionalTest reads this one's output file directly by
+// path (via the system property wired into `tasks.test` below) rather than
+// relying on classpath-resource lookup, precisely so both metadata files can
+// coexist in the same `test` source set without one shadowing the other.
+val agp91PluginUnderTestMetadata = tasks.register<PluginUnderTestMetadata>("agp91PluginUnderTestMetadata") {
+    pluginClasspath.from(sourceSets["main"].runtimeClasspath, agp91TestKitClasspath)
+    outputDirectory.set(layout.buildDirectory.dir("agp91PluginUnderTestMetadata"))
+}
+
 tasks.test {
     useJUnitPlatform()
+    dependsOn(agp91PluginUnderTestMetadata)
+    systemProperty(
+        "articulate.agp91PluginUnderTestMetadata",
+        agp91PluginUnderTestMetadata.get().outputDirectory.file("plugin-under-test-metadata.properties").get().asFile.absolutePath,
+    )
 }
