@@ -359,9 +359,19 @@ Read at `ListenUpApp/ListenUp`, `tools/build-logic/convention/src/main/kotlin/li
 
 ### 4.4 `generateStrings`
 
-Typed task. Input: the strings tree (`@get:InputDirectory`, `@get:PathSensitive(RELATIVE)`). Outputs, per the open decision in §4.8:
-- Android res tree under `build/generated/i18n/res` — per-locale `values*/strings.xml`, normalized and deterministic.
-- The committed `Shared.xcstrings` at a DSL-configured path in the iOS project tree.
+**DECIDED 2026-07-30: two typed tasks plus an aggregate.** The two outputs have genuinely different lifecycles — the Android res tree is disposable and regenerated every build, the catalog is committed and should change only when strings change — so collapsing them into one task produces something that is never cleanly up-to-date.
+
+| Task | Input | Output |
+|---|---|---|
+| `generateAndroidRes` | strings tree (`@get:InputDirectory`, `@get:PathSensitive(RELATIVE)`) | `build/generated/i18n/res` — per-locale `values*/strings.xml` |
+| `generateXcstrings` | same | the committed `Shared.xcstrings`, at a DSL-configured path |
+| `generateStrings` | — | none; a lifecycle task that `dependsOn` both |
+
+**The aggregate keeps the name `generateStrings`** because that string is already baked into §5's drift-gate failure message and the CI recipe — users are told to run it, so it must remain the thing they run.
+
+Rejected: one task writing both (ListenUp's shape). Its merit was making divergence between the outputs structurally impossible, but that risk is already covered — both derive from the same `core` conversion, and §5's gate catches drift regardless. An aggregate costs nothing and buys each output accurate up-to-date semantics, plus the ability for CI to regenerate only the committed artifact.
+
+*Implementation note:* both tasks parse and convert independently rather than sharing an intermediate. That duplicates work, but the conversion is in-memory and trivial at realistic string counts — do not add a shared-state mechanism to avoid it, since shared state between tasks is a classic configuration-cache hazard.
 
 Both are byte-deterministic via m1's `XcstringsWriter` and the same canonical rules, so re-running without source changes must produce identical bytes — that property is what makes §5's gate meaningful.
 
@@ -409,7 +419,7 @@ Config-cache violations are the archetypal silent failure: everything works unti
 
 Tier 2 of D2: TestKit functional tests for task wiring, up-to-dateness (second run is `UP-TO-DATE`), config-cache reuse, and `warningsAsErrors` behavior. Tier 3: the `sample/` composite build as an end-to-end smoke.
 
-**Open decision — one task or two?** `generateStrings` currently writes both outputs, matching ListenUp. But the two have genuinely different lifecycles: the Android res tree is a disposable build artifact under `build/`, while `Shared.xcstrings` is a **committed** file that should change only when strings change. Splitting into `generateAndroidRes` + `generateXcstrings` (with `generateStrings` as an aggregate) gives each accurate up-to-date semantics and lets CI regenerate only the committed artifact; keeping one task is simpler and makes divergence between the two outputs structurally impossible. **Needs a ruling before implementation.**
+TestKit cases must include: each of the two generate tasks reporting `UP-TO-DATE` on a second run with no source change; editing one locale's `strings.xml` re-running both; `generateStrings` (the aggregate) invoking both; and `--configuration-cache` reporting *reuse*, not merely success.
 
 ## 5. Milestone 5 — `verifyStrings` drift gate (full detail)
 
