@@ -683,3 +683,51 @@ The launcher is unavoidably environmental — `gradlew` is a shell script that n
 
 - **D9 needs revision at milestone 4.** KGP 2.4.10 supports AGP **8.5.2 – 9.1.0**, which conflicts with §E2's provisional AGP 8.1 floor. The floor is about what *consumers* may use, not what we build with, but the `sample/` build and any TestKit matrix are constrained by this. Resolve when D9 is actually ruled.
 - Build-with Gradle 9.5.0 versus the supported *floor* remains a milestone-4 question — `core` has no Gradle API surface, so milestones 1–3 are unaffected.
+
+---
+
+## 13. Pre-v0 checklist
+
+D7 sets v0 = milestones 1–5. **All five are now implemented and audited** (216 tests). This section tracks what stands between here and publishing, so none of it is rediscovered later. Nothing below blocks development; everything below blocks a release.
+
+### Ruled: defer, but fix before publishing
+
+**Isolated projects incompatibility.** *Decided 2026-07-31: defer, track, revisit before v0 publishes.*
+
+`net.sarazan.articulate.android` fails hard under `org.gradle.unsafe.isolated-projects=true`:
+
+```
+Cannot access project ':i18n' from project ':app'
+```
+
+Not a warning — a build failure, reproduced on both `:app:help` and a real compile at Gradle 8.7 / AGP 8.5.2. All three cross-project reaches are implicated (`evaluationDependsOn`, `project.project(path)`, `tasks.named(...)`); removing one does not help. Gradle attributes it to `com.android.internal.application`, because the calls run inside AGP's `onVariants` callback — so a user hitting this would have no reason to suspect Articulate.
+
+*Why defer:* costs nothing today. Isolated projects is opt-in and incubating; the configuration cache — the specified requirement — genuinely reuses across all four tasks, verified independently. *Why not indefinitely:* if a consumer adopts isolated projects our plugin blocks them, with an error naming someone else. If Gradle defaults it on, that becomes everyone.
+
+*The fix, when taken:* `:i18n` exposes the generated tree as a **consumable configuration** (e.g. `artifactType = "android-res-dir"`, `outgoing.artifact(generateAndroidRes.flatMap { it.androidResDir })`); `:app` consumes it as a dependency rather than reaching into another project's task container. That is dependency resolution rather than project-container access, which isolated projects permits, and it carries task dependencies implicitly so `evaluationDependsOn` disappears. Cost: `addGeneratedSourceDirectory` wants a `TaskProvider`, so `:app` likely needs a small per-variant task consuming the artifact.
+
+*Cheapest next step before committing to the redesign:* check whether **AGP 8.5.2 is itself isolated-projects-clean**. If AGP blocks it regardless, our contribution is moot until AGP catches up, and the work can wait for that.
+
+### Correctness items from the M4/M5 audit
+
+- **`markupPolicy` silently no-ops.** Setting `STRIP` or `VERBATIM` produces `ERROR` behavior with no diagnostic. Spec-conformant per D4 (the knob ships in v0, implementations deferred) — but a user who asks for `STRIP` and silently gets `ERROR` is exactly the "95% right is worse than none" hazard the brief forbids. **Recommend failing fast on any non-`ERROR` value until implemented**, which is a few lines and converts a silent surprise into a clear one.
+- **Applying both plugins to one module** dies with a raw `org.gradle.api.CircularReferenceException` naming nothing about Articulate — a violation of §4.1 lesson 6 (messages must name the problem and the fix). One-line guard: `if (i18nProjectPath != project.path) project.evaluationDependsOn(i18nProjectPath)`.
+- **`GenerateXcstringsTask`'s "ios catalog not configured" error is unreachable.** `xcstringsFile` is `@OutputFile` without `@Optional`, so Gradle's own property validation fires first with a generic message. Either mark it `@Optional` so the helpful error can run, or delete the dead branch. `VerifyStringsTask`'s equivalent guard *does* fire, because it uses `@Internal`.
+
+### Infrastructure gaps
+
+- **There is no CI configuration in the repo at all.** D9's matrix therefore exists only on paper: the Gradle 8.7 floor is exercised by a functional test, but the **AGP 9.1 upper cell has never run**. CI also needs `ANDROID_HOME` and SDK Platform 34 (AGP 8.5's maximum `compileSdk`), plus Gradle's `wrapper-validation` action per §E6.
+- **`gradleFloor = "8.7"` in `libs.versions.toml` is unreferenced.** Its comment claims a functional test runs under it; the test uses its own constant. Two sources of truth for one number — collapse them.
+
+### Spec gap
+
+- **The `commonMain` keys object** is listed in D7's v0 scope and assigned to `net.sarazan.articulate` in §4.2, but §4.4's task table omits it and nothing implements it. This is a drafting error in §4, not an implementation miss. Either spec and build it, or amend D7 to move it to v0.1.
+
+### Still-open decisions
+
+**D8** (SwiftPM story — docs-only) and **D11** (publishing — Plugin Portal first, which also gates the Portal name-collision check on the hub). Neither blocks development; both block release.
+
+### Pending human input
+
+- **The Xcode catalog `version`** — one question, see `core/src/test/fixtures/xcode/README.md`. Everything else about Xcode's serialization is now verified.
+- **`zh-rSG` / `zh-rMO`** locale policy (§3.1) — currently falls through to plain region tags, pinned by a test so it cannot drift silently.
