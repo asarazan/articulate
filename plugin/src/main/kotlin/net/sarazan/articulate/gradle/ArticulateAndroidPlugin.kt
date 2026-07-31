@@ -22,17 +22,21 @@ import org.gradle.api.UnknownTaskException
  * pulls AGP onto its classpath.
  *
  * ---
- * **UNVERIFIED IN THIS ENVIRONMENT.** This machine has no Android SDK (no
- * `ANDROID_HOME`, no `~/Library/Android/sdk`, no `local.properties`), so no
- * TestKit functional test applying `com.android.application` can run here --
- * AGP requires the SDK to configure even a trivial project. This class
- * compiles cleanly against the real AGP 8.5.2 jar (see `plugin/build.gradle.kts`),
- * which does confirm the API surface used below (`ApplicationAndroidComponentsExtension`,
- * `variant.sources.res`, `addGeneratedSourceDirectory`) exists and type-checks
- * at that version, exactly matching PLAN.md §4.5's sketch -- but nothing here
- * has been exercised against a real Android build. Never write into a variant's
- * checked-in `res` source set; never use the legacy `sourceSets["main"].res.srcDir`
- * (both settled, §4.5).
+ * **Verified against a real Android build** by [AndroidWiringFunctionalTest],
+ * which runs AGP 8.5.2 on Gradle 8.7 (D9's floor, `compileSdk 34`) against an
+ * installed SDK and compiles a Java source referencing `R.string.hello` --
+ * proof the wired directory actually reached AGP's resource merge, not merely
+ * that a task ran. (An earlier revision of this doc said the opposite; the
+ * machine had no SDK at the time. Superseded 2026-07-31.) Never write into a
+ * variant's checked-in `res` source set; never use the legacy
+ * `sourceSets["main"].res.srcDir` (both settled, §4.5).
+ *
+ * **Known limitation:** the cross-project lookup below is incompatible with
+ * Gradle's isolated-projects mode. Under
+ * `-Dorg.gradle.unsafe.isolated-projects=true` a two-module fixture fails with
+ * `Cannot access project ':i18n' from project ':app'` (reproduced against
+ * Gradle 8.7, 2026-07-31). Configuration caching alone is unaffected -- entries
+ * are stored and reused normally, see [AndroidWiringFunctionalTest].
  */
 class ArticulateAndroidPlugin : Plugin<Project> {
 

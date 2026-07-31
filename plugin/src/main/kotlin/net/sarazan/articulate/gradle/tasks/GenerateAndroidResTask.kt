@@ -16,10 +16,19 @@ import org.gradle.api.tasks.TaskAction
 import java.io.File
 
 /**
- * PLAN.md §4.4: regenerates `build/generated/i18n/res` from the strings
- * source tree. Disposable -- regenerated every build, never committed, and
- * lives under a build-directory path no other plugin claims (the "narrow
- * output declaration" lesson from ListenUp, §4.1).
+ * PLAN.md §4.4: regenerates the per-locale Android `values-<tag>/strings.xml`
+ * tree from the strings source tree. Disposable -- never committed, under a
+ * build directory (the "narrow output declaration" lesson from ListenUp, §4.1).
+ *
+ * **Where the output lands is not this task's decision** whenever
+ * [net.sarazan.articulate.gradle.ArticulateAndroidPlugin] is wiring it:
+ * `addGeneratedSourceDirectory(task, wiredWith)` makes AGP set [androidResDir]
+ * itself, so the tree materializes under the *consuming app project's* build
+ * dir (`app/build/generated/res/generateAndroidRes/`), not this module's.
+ * §4.4, corrected 2026-07-30 against a real built fixture. The convention set
+ * by `ArticulatePlugin` (`build/generated/i18n/res`) therefore applies only
+ * when nothing wires the property -- do not reason about it when debugging a
+ * variant-wired build.
  *
  * Runs the full [AndroidToXcstringsConverter.convert] pipeline (parse +
  * every cross-locale validation rule in `docs/CONVERSIONS.md`) purely as a
@@ -49,7 +58,12 @@ abstract class GenerateAndroidResTask : DefaultTask() {
     @get:Input
     abstract val warningsAsErrors: Property<Boolean>
 
-    /** `build/generated/i18n/res` by convention (set by [net.sarazan.articulate.gradle.ArticulatePlugin]). */
+    /**
+     * `build/generated/i18n/res` by convention (set by
+     * [net.sarazan.articulate.gradle.ArticulatePlugin]) -- but **overridden by
+     * AGP** whenever `net.sarazan.articulate.android` wires this property via
+     * `addGeneratedSourceDirectory`; see this class's KDoc.
+     */
     @get:OutputDirectory
     abstract val androidResDir: DirectoryProperty
 

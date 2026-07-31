@@ -80,8 +80,17 @@ internal object FunctionalTestSupport {
             .forwardOutput()
 
     /**
-     * The AGP-pinned version used everywhere an Android fixture applies
-     * `com.android.application` (D9's floor, `libs.versions.toml`'s `agp`).
+     * **Documentation only -- changing this changes nothing.** The AGP an
+     * Android fixture actually gets is whatever `agpTestKitClasspath`
+     * (`libs.versions.toml`'s `agp`) feeds into `pluginUnderTestMetadata`;
+     * fixtures apply `com.android.application` with no version, deliberately
+     * (see [writeAndroidAppModule]). This constant records the value that
+     * mechanism is expected to supply.
+     *
+     * Verified 2026-07-31 by printing
+     * `com.android.builder.model.Version.ANDROID_GRADLE_PLUGIN_VERSION` from a
+     * live fixture: `8.5.2`, i.e. D9's floor. Re-verify by that route, never
+     * by reading this constant.
      */
     const val AGP_VERSION = "8.5.2"
 
@@ -138,11 +147,16 @@ internal object FunctionalTestSupport {
      * Multi-module settings file for the Android fixtures: `:i18n` (the
      * strings source module, `net.sarazan.articulate`) and `:app` (the
      * Android app module, `net.sarazan.articulate.android` + `com.android.application`).
-     * `:i18n` is declared first so it evaluates first -- [ArticulateAndroidPlugin]'s
-     * cross-project task lookup in `androidComponents.onVariants` requires
-     * `:i18n`'s `generateAndroidRes` task to already be registered by the
-     * time `:app`'s AGP variant callbacks fire during `:app`'s own
-     * evaluation (§4.2/§4.5). `google()` is required in `dependencyResolutionManagement`
+     * [modules] is only the `include` order; it is **not** the evaluation
+     * order. Gradle configures siblings in alphabetical path order, so `:app`
+     * is always evaluated before `:i18n` here, and `:i18n`'s
+     * `generateAndroidRes` therefore does *not* exist yet when AGP fires
+     * `:app`'s `onVariants` callbacks. [ArticulateAndroidPlugin]'s
+     * `evaluationDependsOn` is what makes the lookup work anyway --
+     * mutation-verified, see `AndroidWiringFunctionalTest.writeTwoModuleFixture`.
+     * (A previous revision of this doc claimed the opposite, that listing
+     * `:i18n` first made it evaluate first. It does not. Corrected 2026-07-31.)
+     * `google()` is required in `dependencyResolutionManagement`
      * even though AGP's own jar reaches the fixture via the injected
      * plugin-under-test classpath, not via these repositories (see
      * [writeAndroidAppModule]) -- AGP dynamically resolves its own runtime

@@ -151,4 +151,45 @@ class GenerateTasksFunctionalTest {
         // by something else in the fixture.
         assertFalse(result.output.contains("BUILD SUCCESSFUL"))
     }
+
+    /**
+     * PLAN.md §4.7, verbatim: "any diagnostic fails the task with a message
+     * listing **every offender** -- not just the first, so one build surfaces
+     * the whole set."
+     *
+     * The single-offender test above cannot distinguish "lists every offender"
+     * from "lists the first offender and stops" -- with one diagnostic the two
+     * behaviors are identical output. This one uses three, and asserts all
+     * three appear in the failure message itself (not merely in the WARN log
+     * that precedes it, which is a separate loop).
+     */
+    @Test
+    fun `warningsAsErrors names every offender, not just the first`() {
+        writeBaseBuildFile(projectDir, extraConfig = "warningsAsErrors = true")
+        File(projectDir.toFile(), "src/main/strings/values/strings.xml").writeText(
+            """
+            <resources>
+                <string name="hello">Hello</string>
+                <string name="first.offender">One</string>
+                <string name="second-offender">Two</string>
+                <string name="third.offender">Three</string>
+            </resources>
+            """.trimIndent(),
+        )
+        File(projectDir.toFile(), "src/main/strings/values-de").deleteRecursively()
+
+        val result = runner(projectDir, "generateXcstrings").buildAndFail()
+
+        // Scope the assertion to the aggregated failure message, so a match
+        // inside the preceding per-diagnostic WARN lines cannot satisfy it.
+        val marker = "warningsAsErrors is true and 3 diagnostic(s) were found:"
+        val failureMessage = result.output.substringAfter(marker, "")
+        assertTrue(failureMessage.isNotEmpty(), "expected the aggregated failure message:\n${result.output}")
+        for (key in listOf("first.offender", "second-offender", "third.offender")) {
+            assertTrue(
+                failureMessage.contains(key),
+                "the aggregated failure must name every offender, but '$key' is missing:\n$failureMessage",
+            )
+        }
+    }
 }

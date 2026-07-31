@@ -38,7 +38,14 @@ class ArticulatePlugin : Plugin<Project> {
 
         val generateAndroidRes = project.tasks.register("generateAndroidRes", GenerateAndroidResTask::class.java) { task ->
             task.group = ARTICULATE_TASK_GROUP
-            task.description = "Regenerates build/generated/i18n/res from the strings source tree (disposable, always re-run)."
+            // §4.4 (CORRECTED): "any user-facing documentation of 'where do the
+            // generated Android resources go' must name the app module's build
+            // dir, not :i18n's" -- so this user-visible `gradlew tasks` line has
+            // to name both cases, since the convention below only survives when
+            // net.sarazan.articulate.android is NOT wiring the output.
+            task.description = "Regenerates the disposable per-locale Android values*/strings.xml tree. " +
+                "Output goes to the app module's build/generated/res/generateAndroidRes when " +
+                "net.sarazan.articulate.android wires it, otherwise this module's build/generated/i18n/res."
             task.stringsDir.set(extension.stringsDir)
             task.sourceLanguage.set(extension.sourceLanguage)
             task.localeOverrides.set(extension.localeOverrides)

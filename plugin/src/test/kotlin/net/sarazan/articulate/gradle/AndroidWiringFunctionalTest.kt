@@ -90,7 +90,25 @@ class AndroidWiringFunctionalTest {
             .withArguments(*args)
             .forwardOutput()
 
-    /** Writes the standard two-module fixture: `:i18n` (source tree + `net.sarazan.articulate`) and `:app` (`net.sarazan.articulate.android` + `com.android.application`). */
+    /**
+     * Writes the standard two-module fixture: `:i18n` (source tree +
+     * `net.sarazan.articulate`) and `:app` (`net.sarazan.articulate.android` +
+     * `com.android.application`).
+     *
+     * **`include` order is not evaluation order.** Gradle evaluates sibling
+     * projects in alphabetical path order, so `:app` is configured *before*
+     * `:i18n` here no matter which the settings file lists first -- meaning
+     * every fixture in this class exercises exactly the ordering hazard
+     * [ArticulateAndroidPlugin]'s `project.evaluationDependsOn(i18nProjectPath)`
+     * exists to defuse: `:i18n` has not yet registered `generateAndroidRes`
+     * when AGP fires `:app`'s `onVariants` callbacks.
+     *
+     * Mutation-verified 2026-07-31: deleting that one call fails four tests in
+     * this class, each with the plugin's own (in that state, false)
+     * `project ':i18n' has no 'generateAndroidRes' task -- apply
+     * net.sarazan.articulate to it first`. The line is load-bearing and is
+     * covered; do not "simplify" it away.
+     */
     private fun writeTwoModuleFixture(): File {
         writeAndroidSettings(projectDir)
         val i18nDir = File(projectDir.toFile(), "i18n").apply { mkdirs() }
