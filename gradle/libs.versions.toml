@@ -2,12 +2,20 @@
 # Max Gradle fully supported by KGP 2.4.10 is 9.5.0 — wrapper is pinned to match.
 kotlin = "2.4.10"
 junit = "5.14.4"
+# D9 — the supported floor. compileOnly-pinned so `plugin` cannot accidentally
+# compile against a newer AGP API a floor consumer wouldn't have at runtime.
+agp = "8.5.2"
+# D9's floor Gradle — a plugin/ functional test runs under this exact version
+# via TestKit's withGradleVersion to catch gradleApi() binding to a newer API
+# (gradleApi() itself binds to the *building* Gradle, 9.5.0, not this floor).
+gradleFloor = "8.7"
 
 [libraries]
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 # Gradle 9 requires the launcher on the test runtime classpath explicitly.
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+android-gradle-plugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

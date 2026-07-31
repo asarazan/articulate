@@ -11,10 +11,15 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         mavenCentral()
+        // AGP itself (plugin/'s compileOnly dependency, pinned per D9) is only
+        // published to Google's Maven repo, never Maven Central.
+        google()
     }
 }
 
 rootProject.name = "articulate"
 
-// `plugin` and `sample` land in milestone 4 (D1: multi-module).
+// `sample` lands separately (D1: multi-module) — it needs an Android SDK this
+// machine doesn't have, and is explicitly out of scope for milestone 4/5.
 include("core")
+include("plugin")
