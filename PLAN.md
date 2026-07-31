@@ -545,7 +545,24 @@ Research adds one supporting argument: AAPT2's `ParseArrayImpl` accepts a genera
 **Recommend: v0 = milestones 1–5** — strings + plurals + comments + locale mapping + `generateStrings` + `verifyStrings` + the `commonMain` keys object. The drift gate (m5) belongs in v0 because determinism-without-enforcement is half the pitch. **Swift key-parity lint (m6) = v0.1** — it's the best marketing feature but needs heuristics that shouldn't gate the core release. String-arrays rejected (D6), inline HTML per D4.
 Note: comment passthrough is *in* v0 because the brief settles catalog `comment` population (see flag F1).
 
-### D8. SwiftPM story
+### D8. SwiftPM story — DECIDED (2026-07-31): docs only — **but flagged to revisit**
+**Ruled: `docs/swiftpm.md`, no v0 code.** Ruled with explicitly incomplete understanding, so this is *provisional in a way the other decisions are not* — revisit before v0 publishes, and again if anyone reports hitting it.
+
+Precisely what is and isn't broken, since "SwiftPM support" bundles three separable things:
+
+| Part | Status |
+|---|---|
+| Runtime lookup of a bundled catalog | **Probably fine** — SwiftPM processes localization resources. *Not verified end to end.* |
+| **Typed symbol generation** (`Text(.Shared.key)`) | **Genuinely broken** under standalone `swift build`. `xcstringstool` lives in `Xcode.app/Contents/Developer/usr/bin/`, not the Swift toolchain — verified. |
+| Compilation to `.strings`/`.stringsdict` | Same tool, same unreachability. |
+
+**Scope of the breakage is narrower than it first appears.** It bites only on *standalone* package builds (`swift build`, `swift test`, package CI). When Xcode builds an app depending on a local package, Xcode drives the build and catalog handling applies normally — and a dual-native app's iOS side is essentially always an Xcode project, with packages as libraries inside it. *This paragraph is reasoning about Xcode's build system, not an observation; it is the main thing to verify if this decision is reopened.*
+
+**Why docs rather than code:** closing the gap means reimplementing `generate-symbols`, which is exactly what [xcstrings-tool](https://github.com/liamnichols/xcstrings-tool) already does maturely — and it couples us to Swift toolchain changes permanently, which is the toolchain coupling the no-runtime pitch exists to avoid.
+
+**Revisit triggers:** a user reports it; we verify runtime lookup and the Xcode-drives-local-packages claim and either is false; or Apple ships `generate-symbols` in the Swift toolchain.
+
+### D8 rationale (original recommendation, retained)
 **Recommend: documented workaround, out of code scope for v0.** The catalog targets an Xcode app target where symbol generation works out of the box (the brief's "additive to Xcode 26" pitch). For SwiftPM packages, `swift build` doesn't generate catalog symbols — document the known approaches (Saidi's and Elegant Chaos's write-ups are already in the brief's references, xcstrings-tool as the escape hatch) in a `docs/swiftpm.md`, and revisit only if users ask. Building tooling here would drag in exactly the toolchain-coupling the no-runtime pitch avoids.
 
 ---
@@ -735,13 +752,53 @@ Not a warning — a build failure, reproduced on both `:app:help` and a real com
 
 ### Spec gap
 
-- **The `commonMain` keys object** is listed in D7's v0 scope and assigned to `net.sarazan.articulate` in §4.2, but §4.4's task table omits it and nothing implements it. This is a drafting error in §4, not an implementation miss. Either spec and build it, or amend D7 to move it to v0.1.
+- **The `commonMain` keys object — BLOCKED ON A SAMPLE PROJECT (2026-07-31), deliberately.** Listed in D7's v0 scope and assigned to `net.sarazan.articulate` in §4.2, but §4.4's task table omits it and nothing implements it (a drafting error in §4, not an implementation miss). Rather than rule blind, the decision waits on something to evaluate against — see §14. The two things that make it non-trivial and that a sample would make concrete: wiring generated code into `commonMain` needs a **KMP integration surface the plugin does not have** (a third one, alongside AGP), and the brief's "resolve at platform edge" is natural on iOS (`String(localized:table:)` takes a string key) but awkward on Android, where `getString` needs an **int** resource ID — so a bare key needs either `getIdentifier()` (reflective, discouraged) or a second generated key→`R.string` mapping. That half is unspecified.
 
 ### Still-open decisions
 
-**D8** (SwiftPM story — docs-only) and **D11** (publishing — Plugin Portal first, which also gates the Portal name-collision check on the hub). Neither blocks development; both block release.
+**All decisions are now ruled.** D8 (docs only, flagged to revisit — §8) and D11 (**Gradle Plugin Portal first**, decided 2026-07-31: canonical discovery for `id("net.sarazan.articulate")` with no repository declaration needed by consumers; Maven Central can follow without disrupting anyone) — D11 still gates the Portal name-collision check on the hub pre-flight list. The `commonMain` keys object is not a decision but a blocked one, waiting on §14.
 
 ### Pending human input
 
 - **The Xcode catalog `version`** — one question, see `core/src/test/fixtures/xcode/README.md`. Everything else about Xcode's serialization is now verified.
-- **`zh-rSG` / `zh-rMO`** locale policy (§3.1) — currently falls through to plain region tags, pinned by a test so it cannot drift silently.
+- ~~`zh-rSG` / `zh-rMO` locale policy~~ — **DECIDED 2026-07-31: keep the fallthrough** (`zh-SG`, `zh-MO`). It loses no information, `localeOverrides` already lets anyone map them explicitly, and D5a's CN/TW/HK rule is itself asymmetric in a way matching neither Apple's maximal nor minimal identifier output — so a fifth rule would compound a guess rather than resolve one. The existing test pins the behavior.
+
+---
+
+## 14. Sample project — the decision surface for the keys object
+
+Requested 2026-07-31: the `commonMain` keys object cannot be ruled on sensibly without something to hold. This section specs what that sample has to contain to make the question *concrete*, as opposed to merely existing.
+
+### What it must make you feel
+
+The keys object exists so shared KMP code can name a string without depending on a localization runtime. The sample is only useful if it puts you in that situation:
+
+1. A string authored **once** in `:i18n`.
+2. Android UI resolving it natively via `R.string`.
+3. iOS resolving it from the committed `Shared.xcstrings`.
+4. **Shared KMP code in `commonMain` that wants to refer to that string** — e.g. a validation routine returning "this failed, show `error_email_invalid`" — with no localization dependency in the shared layer.
+5. The Android edge actually resolving that key, which is where the awkwardness lives: `getString` needs an **int** ID, so a bare key string forces either `getIdentifier()` (reflective, discouraged by Google) or a second generated key→`R.string` map.
+
+Point 5 is the whole decision. A sample that skips it answers nothing.
+
+### Proposed shape
+
+```
+sample/
+├── settings.gradle.kts          # includeBuild("../") to use the plugin under development
+├── i18n/                        # net.sarazan.articulate — strings authored here
+│   └── src/main/strings/values*/strings.xml
+├── shared/                      # KMP, commonMain — the module that wants keys
+├── androidApp/                  # net.sarazan.articulate.android + AGP; consumes R.string and :shared
+└── ios/App/Shared.xcstrings     # committed catalog
+```
+
+The iOS side can start as the committed catalog plus a minimal Swift file; a full SwiftUI app is only needed to demonstrate pitch #3 (`Text(.Shared.key)` via generated symbols) and can follow.
+
+### Positioning caveat — state it in the sample's own README
+
+The brief's pitch #5 is **"doesn't require KMP."** A KMP-only sample risks implying the opposite. Its README must say plainly that KMP is present *to exercise the optional shared-keys feature*, not because the plugin needs it — and ideally a second, non-KMP fixture eventually proves that structurally (a plain Android app plus `:i18n`, which is also the cheaper tier-3 CI smoke).
+
+### Relationship to D2 tier 3
+
+D2's third test tier is a `sample/` composite build as an end-to-end smoke. This sample can serve that purpose, but the two goals pull in opposite directions: a CI fixture wants to be minimal, hermetic and fast, while a decision surface wants to be realistic enough to reveal friction. If they conflict, **realism wins here** — the CI smoke can be a separate, smaller fixture later.
