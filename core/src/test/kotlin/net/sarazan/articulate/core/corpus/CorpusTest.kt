@@ -1,0 +1,91 @@
+package net.sarazan.articulate.core.corpus
+
+import net.sarazan.articulate.core.convert.AndroidToXcstringsConverter
+import net.sarazan.articulate.core.serialize.XcstringsWriter
+import org.junit.jupiter.api.Assertions.assertArrayEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.fail
+import org.junit.jupiter.api.DynamicTest
+import org.junit.jupiter.api.TestFactory
+import java.io.File
+import java.util.stream.Stream
+
+/**
+ * Directory-per-case golden tests, per PLAN.md §2.1. Each subdirectory of
+ * `core/src/test/corpus/` is one dynamic test, discovered automatically --
+ * adding a case is adding files, never editing this runner.
+ *
+ * A case is either:
+ *  - **success**: `input/values[-<tag>]/strings.xml` + `expected.xcstrings`,
+ *    a byte-exact expectation.
+ *  - **error**: `input/values[-<tag>]/strings.xml` + `expected-error.txt`,
+ *    one required substring per non-blank line that the thrown exception's
+ *    message must contain (name-the-file/key/fix quality, not just "it failed").
+ *
+ * Every `expected.xcstrings` here is generated from this project's own
+ * converter + [XcstringsWriter], never hand-typed (see the milestone's own
+ * warning about transcribing nested JSON by hand) -- which also means this
+ * test's core assertion *is* the corpus's self-consistency check: the
+ * checked-in file is byte-identical to what the canonical serializer
+ * currently produces, by construction.
+ */
+class CorpusTest {
+
+    @TestFactory
+    fun corpus(): Stream<DynamicTest> {
+        val root = corpusRoot()
+        val cases = root.listFiles { f -> f.isDirectory }.orEmpty().sortedBy { it.name }
+        check(cases.isNotEmpty()) { "no corpus cases found under ${root.path}" }
+        return cases.stream().map { dir -> DynamicTest.dynamicTest(dir.name) { runCase(dir) } }
+    }
+
+    private fun runCase(dir: File) {
+        val inputDir = File(dir, "input")
+        check(inputDir.isDirectory) { "corpus case '${dir.name}' is missing an input/ directory" }
+        val expectedXcstrings = File(dir, "expected.xcstrings")
+        val expectedError = File(dir, "expected-error.txt")
+
+        when {
+            expectedXcstrings.isFile -> runSuccessCase(dir.name, inputDir, expectedXcstrings)
+            expectedError.isFile -> runErrorCase(dir.name, inputDir, expectedError)
+            else -> fail<Unit>("corpus case '${dir.name}' has neither expected.xcstrings nor expected-error.txt")
+        }
+    }
+
+    private fun runSuccessCase(name: String, inputDir: File, expectedFile: File) {
+        val catalog = try {
+            AndroidToXcstringsConverter.convert(inputDir)
+        } catch (e: Exception) {
+            fail<Unit>("corpus case '$name' expected success but conversion threw: ${e.message}", e)
+            return
+        }
+        val actual = XcstringsWriter.writeBytes(catalog)
+        val expected = expectedFile.readBytes()
+        assertArrayEquals(expected, actual) { "corpus case '$name': serialized catalog does not byte-match expected.xcstrings" }
+    }
+
+    private fun runErrorCase(name: String, inputDir: File, expectedFile: File) {
+        val requiredSubstrings = expectedFile.readLines().map { it.trim() }.filter { it.isNotEmpty() }
+        check(requiredSubstrings.isNotEmpty()) { "corpus case '$name': expected-error.txt has no content" }
+
+        val message = try {
+            AndroidToXcstringsConverter.convert(inputDir)
+            null
+        } catch (e: Exception) {
+            e.message
+        }
+
+        assertTrue(message != null) { "corpus case '$name' expected an error but conversion succeeded" }
+        for (required in requiredSubstrings) {
+            assertTrue(message!!.contains(required)) {
+                "corpus case '$name': error message did not contain expected substring '$required'.\nActual message: $message"
+            }
+        }
+    }
+}
+
+private fun corpusRoot(): File {
+    val candidates = listOf(File("src/test/corpus"), File("core/src/test/corpus"))
+    for (c in candidates) if (c.isDirectory) return c.canonicalFile
+    error("could not locate src/test/corpus from working directory ${File(".").canonicalPath}")
+}

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="all_cats">
+        <item quantity="zero">%1$d none</item>
+        <item quantity="one">%1$d one</item>
+        <item quantity="two">%1$d two</item>
+        <item quantity="few">%1$d few</item>
+        <item quantity="many">%1$d many</item>
+        <item quantity="other">%1$d other</item>
+    </plurals>
+</resources>

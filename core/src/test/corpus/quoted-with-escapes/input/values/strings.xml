@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quoted_escapes">"a\nb  c"</string>
+</resources>

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mixed">%1$d hat %2$s</string>
+</resources>

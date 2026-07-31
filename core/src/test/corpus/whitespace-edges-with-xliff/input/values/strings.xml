@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <string name="edge_xliff">  <xliff:g id="x">A</xliff:g>  B  </string>
+</resources>

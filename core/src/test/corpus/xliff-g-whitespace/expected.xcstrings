@@ -1,0 +1,18 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "spaced_xliff" : {
+      "comment" : "n",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This is spaced"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

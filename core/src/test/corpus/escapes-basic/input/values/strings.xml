@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="quote_apostrophe">it\'s \"quoted\"</string>
+    <string name="newline_tab">line1\nline2\tindented</string>
+    <string name="backslash">a\\b</string>
+    <string name="unicode">café</string>
+</resources>

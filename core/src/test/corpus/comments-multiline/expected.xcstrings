@@ -1,0 +1,18 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "checkout_done" : {
+      "comment" : "Shown on the checkout confirmation screen.\n      Keep this short: it renders in a small toast.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Order placed"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

@@ -1,0 +1,2 @@
+invalid unicode escape sequence
+4 hex digits

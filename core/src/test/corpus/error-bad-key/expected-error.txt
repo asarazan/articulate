@@ -1,0 +1,1 @@
+resource names must start with a letter or underscore

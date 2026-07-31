@@ -1,0 +1,1 @@
+Plural variation requires referencing the number in the string.

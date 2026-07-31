@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="hex_lower">%x</string>
+    <string name="hex_upper">%X</string>
+    <string name="octal">%o</string>
+</resources>

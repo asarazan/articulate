@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Shown on the checkout confirmation screen.
+      Keep this short: it renders in a small toast.
+    -->
+    <string name="checkout_done">Order placed</string>
+</resources>

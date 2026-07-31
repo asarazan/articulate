@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="other">hello</string>
+    <string name="leading_at">@string/other</string>
+</resources>

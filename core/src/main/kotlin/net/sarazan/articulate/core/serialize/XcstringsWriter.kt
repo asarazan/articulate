@@ -41,6 +41,9 @@ private fun Entry.toJson(): JsonValue.Obj = JsonValue.Obj(
             "localizations",
             JsonValue.Obj(localizations.entries.associate { (tag, localization) -> tag.value to localization.toJson() }),
         )
+        // Matches Xcode's own catalogs: `true` is the default and is never written,
+        // only `false` appears (see Entry.shouldTranslate KDoc).
+        if (!shouldTranslate) put("shouldTranslate", JsonValue.Bool(false))
     },
 )
 

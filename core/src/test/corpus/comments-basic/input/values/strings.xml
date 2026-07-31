@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shown at the top of the home screen -->
+    <string name="home_title">Home</string>
+</resources>

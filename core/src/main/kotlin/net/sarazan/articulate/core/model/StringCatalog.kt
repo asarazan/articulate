@@ -52,10 +52,17 @@ sealed interface Localization {
  * Carries no `extractionState`, for the same reason [StringUnit] carries no state:
  * it is always `manual`, which is precisely what stops Xcode marking generated
  * entries stale.
+ *
+ * [shouldTranslate] mirrors Android's `translatable` attribute one-for-one: the
+ * string still ships in the build, it is only withheld from translation tooling
+ * (verified against `xcstringstool` — see `docs/CONVERSIONS.md` K5/T-rules). `true`
+ * is the default and is never emitted; the key only appears in output when `false`,
+ * matching Xcode's own catalogs, which omit the field rather than writing `true`.
  */
 data class Entry(
     val localizations: Map<LocaleTag, Localization>,
     val comment: String? = null,
+    val shouldTranslate: Boolean = true,
 )
 
 /**

@@ -1,0 +1,2 @@
+inline styling markup
+styled_fmt

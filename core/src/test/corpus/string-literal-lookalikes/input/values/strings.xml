@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="hex_color">#FF0000</string>
+    <string name="number">42</string>
+    <string name="bool_like">true</string>
+    <string name="phone">+15551234</string>
+</resources>

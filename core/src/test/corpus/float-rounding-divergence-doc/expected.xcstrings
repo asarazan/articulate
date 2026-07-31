@@ -1,0 +1,18 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "rounding_prone" : {
+      "comment" : "Java rounds HALF_UP (0.25 to \"0.3\"); C/Swift round half-to-even (0.25 to \"0.2\").\n         Articulate cannot fix this: the catalog format has no rounding-mode field.\n         See docs/CONVERSIONS.md P2.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%.1f"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

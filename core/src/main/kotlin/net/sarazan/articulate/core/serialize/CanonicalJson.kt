@@ -13,6 +13,8 @@ package net.sarazan.articulate.core.serialize
 internal sealed interface JsonValue {
     data class Str(val value: String) : JsonValue
 
+    data class Bool(val value: Boolean) : JsonValue
+
     data class Obj(val members: Map<String, JsonValue>) : JsonValue
 }
 
@@ -25,6 +27,7 @@ internal fun JsonValue.renderCanonical(): String = buildString {
 private fun StringBuilder.appendValue(value: JsonValue, depth: Int) {
     when (value) {
         is JsonValue.Str -> appendEscaped(value.value)
+        is JsonValue.Bool -> append(if (value.value) "true" else "false")
         is JsonValue.Obj -> appendObject(value, depth)
     }
 }

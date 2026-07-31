@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="price">%.2f dollars</string>
+    <string name="sci">%e</string>
+    <string name="sci_upper">%E</string>
+    <string name="plain_float">%f</string>
+</resources>
