@@ -510,7 +510,14 @@ Relevant version facts, verified: AGP 9.3 requires Gradle 9.5.0 (which is our ow
 
 Research adds one supporting argument: AAPT2's `ParseArrayImpl` accepts a general type mask, so array items may be references or non-string items. Auto-indexing would therefore have to invent **both** a key convention *and* a type policy — two guesses, not one. Corpus: `error-string-array`.
 
-### D7. v0 scope
+### D7. v0 scope — DECIDED (2026-07-30): milestones 1–5
+**Ruled as recommended.** v0 ships generation *and* the drift gate; the Swift key-parity lint is v0.1. The gate is not deferrable: byte-determinism without enforcement is half a feature, and a committed generated file with nothing checking it will drift silently — which is precisely the failure the whole determinism effort exists to prevent. Rejected: milestones 1–4 (ships the artifact without the mechanism that keeps it honest) and 1–6 (m6 needs re-speccing off `xcstringstool generate-symbols` first, so it would delay v0 for a feature that is better late than heuristic).
+
+**Also ruled (2026-07-30): the `STRIP` span-text gap is deferred, not pre-built.** The M3 audit found that span-boundary text is *detected* but never *built*, so the three rules governing it (double space at tag edges, edge-trim suppression, quote reset) have no implementation to test — meaning `STRIP` would ship in v0.1 against untested behavior. Ruling: implement those rules *when* `STRIP` is built, together, rather than building a pipeline in v0 that nothing consumes. This is safe because v0 implements only `ERROR`, where the gap is unreachable. The reference `aapt2` outputs for all three rules are already recorded in the audit report, so the work is spec'd when it starts.
+
+---
+
+### D7 rationale (original recommendation, retained)
 **Recommend: v0 = milestones 1–5** — strings + plurals + comments + locale mapping + `generateStrings` + `verifyStrings` + the `commonMain` keys object. The drift gate (m5) belongs in v0 because determinism-without-enforcement is half the pitch. **Swift key-parity lint (m6) = v0.1** — it's the best marketing feature but needs heuristics that shouldn't gate the core release. String-arrays rejected (D6), inline HTML per D4.
 Note: comment passthrough is *in* v0 because the brief settles catalog `comment` population (see flag F1).
 
@@ -593,7 +600,11 @@ Blocking first; later items can wait until their milestone starts.
 - ✅ **D9 — Gradle/AGP floor** (§E2): **AGP 8.5.2 / Gradle 8.7**, two-cell matrix {floor, AGP 9.1}. Revised down from the original AGP 8.1 proposal because KGP 2.4.10 cannot build a sample below 8.5.2 — an 8.1 floor would have advertised an untestable configuration. *Decided 2026-07-30.*
 - ✅ **D10 — Plugin ID / DSL shape** (§E4): **two plugin IDs**, so only the `.android` plugin carries AGP on its classpath and non-Android consumers never pull it. Plus `warningsAsErrors`, defaulting to `false`. *Decided 2026-07-30.*
 
-**Milestone 4 is unblocked** on decisions. Still required before writing the Gradle shell: the brief's mandate to read ListenUp's production `listenup.localization.gradle.kts` for its configuration-cache and task-output lessons.
+- ✅ **D7 — v0 scope** (§8): **milestones 1–5** — generation *and* the drift gate; Swift lint is v0.1. Plus: the `STRIP` span-text gap is implemented when `STRIP` ships, not pre-built, since v0 implements only `ERROR` where the gap is unreachable. *Decided 2026-07-30.*
+- ✅ **`generateStrings` task shape** (§4.4): **two typed tasks plus an aggregate** — different output lifecycles deserve different up-to-date semantics; the aggregate keeps the `generateStrings` name users are told to run. *Decided 2026-07-30.*
+- ✅ **Committed-vs-generated asymmetry** (§4.4): **upheld on review** — it follows from Xcode being outside Gradle's build graph while AGP is inside it. Reasoning and merge-conflict guidance recorded so it isn't re-litigated. *Reviewed 2026-07-30.*
+
+**Milestone 4 is fully unblocked** — every decision it depends on is ruled, and the brief's mandate to read ListenUp's `listenup.localization.gradle.kts` is discharged (§4.1, seven lessons extracted).
 
 ### Still open
 7. **D7 — v0 scope** (§8): milestones 1–5 in v0, Swift lint as v0.1 (recommended). *Hub open question; shapes everything after m3.* **Two research flags:** the m2 corpus grew ~40 → ~65 cases (real added work in the milestone the plan already calls the gate); and m6 should be re-specced to drive off `xcstringstool generate-symbols` output rather than the currently-planned regex scanner — exact instead of heuristic. Timing still correct, design needs revisiting before anyone writes that regex.
