@@ -355,7 +355,27 @@ Read at `ListenUpApp/ListenUp`, `tools/build-logic/convention/src/main/kotlin/li
 
 ### 4.3 Source contract
 
-`:i18n` sources live at `src/main/strings/values-*/strings.xml` (settled). The plugin resolves that as a `DirectoryProperty` with a convention, overridable via the extension. Locale directory names are mapped by `AndroidLocaleMapper` (m3) — the plugin does **not** re-derive locale semantics.
+`:i18n` sources live at `src/main/strings/values-*/strings.xml` (settled). The plugin resolves that as a `DirectoryProperty` with a convention, overridable via the extension — so pointing it at an existing `app/src/main/res` already works and is a legitimate adoption path. Locale directory names are mapped by `AndroidLocaleMapper` (m3) — the plugin does **not** re-derive locale semantics.
+
+#### Multi-file `values-*/` directories — DECIDED 2026-07-31: detect and error, do not silently ignore
+
+**The single-file assumption was a latent silent-loss bug.** Discovery was hardcoded to `values-*/strings.xml`, but **Android merges every XML file in a `values-*/` directory** — splitting copy across `strings.xml`, `plurals.xml`, `arrays.xml` is ordinary practice. A project following that convention had its other files **silently dropped**: no error, no warning, and the vacuous-gate guard could not catch it because `strings.xml` still existed and still yielded keys. It also quietly broke the promise that authoring here works "the same as editing an Android string table directly."
+
+**The rule keys on content, not filename**, because filename-matching would break the point-it-at-a-real-`res/` path — a real `values/` folder routinely holds `colors.xml`, `dimens.xml`, `styles.xml`, none of which are ours:
+
+| File in `values-*/` | Behavior |
+|---|---|
+| `strings.xml` | parsed, as today |
+| any other `*.xml` declaring `<string>`, `<plurals>`, or `<string-array>` | **hard error**, naming the file, the elements found, and stating multi-file support is *not yet* implemented |
+| any other `*.xml` declaring only presentation resources (`<color>`, `<dimen>`, `<style>`, `<bool>`, `<integer>`…) | **silently ignored** — genuinely not this tool's concern |
+
+Content-keying is also more robust on its own terms: it cannot be fooled by someone naming their copy file `marketing.xml`, and it cannot be tripped by presentation resources.
+
+**This is deliberately the first half of full multi-file support, not a stopgap.** Once files carrying localizable content can be identified, adopting the full behavior is flipping one branch from *throw* to *parse* — discovery, classification and their tests all already exist. Moving from error to parse is a **relaxation**: inputs that failed start working, nothing that worked breaks.
+
+**One policy question it defers cleanly.** Android's `donottranslate.xml` convention (Lint exempts such files from `MissingTranslation`) would need a ruling under full multi-file support — do those strings enter the catalog at all, given we already express non-translatability per-string via `translatable="false"` → `shouldTranslate:false`? Erroring today means not guessing today.
+
+Error wording must say **"not yet supported"**, since that message is the migration signal users actually read.
 
 ### 4.4 `generateStrings`
 
