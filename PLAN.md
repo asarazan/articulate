@@ -361,8 +361,15 @@ Exhaustive table test over every row above + property test: output always matche
 - Kotlin DSL, version catalog, included-build `sample/` app (Android app + `:i18n` + a fake `ios/` tree) as living integration test.
 
 ### E2. Supported Gradle/AGP range
-- Floor candidates: **Gradle 8.5 + AGP 8.1** (variant API + `addGeneratedSourceDirectory` mature, config cache stable) — recommended floor; CI matrix {floor, current stable, AGP 9 beta} per the brief's AGP-9 warning.
-- Alternative: latest-only (Gradle 9/AGP 9) — smaller matrix, excludes most real apps for a v0 aimed at adoption.
+**DECIDED 2026-07-30 (D9): floor is AGP 8.5.2 / Gradle 8.7.** CI matrix of two cells — the floor, and AGP 9.1.
+
+The original recommendation here was AGP 8.1 / Gradle 8.5. It was revised because it predated knowing our own toolchain's limits: **KGP 2.4.10 supports AGP 8.5.2 – 9.1.0**, so a sample built with our pinned Kotlin cannot go below AGP 8.5.2. Advertising an 8.1 floor would mean claiming support for a configuration we could only partially verify — and the floor cell would have to use a different Kotlin than the one we develop against, so the advertised configuration would differ from the tested one. This project does not ship unverified claims; the floor is therefore set to what we can actually build and test end to end.
+
+Rejected: **AGP 9.0+ only** — smallest matrix and no compatibility shims, but AGP 9.0 only shipped January 2026, so it would exclude a large share of active projects from a v0 whose whole purpose is adoption.
+
+Relevant version facts, verified: AGP 9.3 requires Gradle 9.5.0 (which is our own wrapper version); AGP 9.0 shipped January 2026. Note KGP 2.4.10's AGP ceiling of 9.1.0 means testing against AGP 9.3 is outside what our Kotlin officially supports — the matrix's upper cell is 9.1, not "latest".
+
+*Open verification item for m4:* the exact AGP version that introduced `variant.sources.res.addGeneratedSourceDirectory` was not pinned down from documentation — the Variant API is stable from AGP 7.0, but the `sources.res` shape is later. Since the floor is now 8.5.2, this is comfortably moot unless someone argues the floor down; confirm empirically by compiling `plugin` against the floor AGP rather than trusting a doc.
 
 ### E3. Test strategy
 **DECIDED 2026-07-30: three tiers.**
@@ -371,17 +378,22 @@ Exhaustive table test over every row above + property test: output always matche
 - Note: only tier 1 exists during milestones 1–3. Tiers 2–3 arrive with milestone 4.
 
 ### E4. Consumer DSL shape
-- **(a) Two plugin IDs** — `net.sarazan.articulate` (on `:i18n`: source + generation + verify) and `net.sarazan.articulate.android` (on the app module: variant res wiring). Explicit, each module's role visible. Recommended.
-- **(b) One plugin ID, behavior keyed on what's applied alongside** — fewer IDs, magic detection; harder to document and to fail clearly when misapplied.
-- Extension sketch (either way):
+**DECIDED 2026-07-30 (D10): two plugin IDs.**
+- **(a) Two plugin IDs** — `net.sarazan.articulate` (on `:i18n`: source + generation + verify) and `net.sarazan.articulate.android` (on the app module: variant res wiring). **Chosen.** Beyond each module's role being explicit, there is a concrete technical payoff: **only the `.android` plugin needs AGP on its classpath**, so a KMP-only or non-Android consumer never pulls AGP at all. That directly serves the brief's pitch that the tool doesn't require KMP and suits any dual-native app.
+- **(b) One plugin ID with auto-detection** — rejected. It forces AGP onto every consumer's classpath, detection failures are hard to diagnose, and misapplication fails confusingly rather than loudly.
+- Extension sketch:
   ```kotlin
   articulate {
-    sourceLanguage = "en"                       // default "en"
+    sourceLanguage = "en"                        // default "en"
     ios { catalog = file("../ios/App/Shared.xcstrings"); table = "Shared" }
     localeOverrides.put("zh-rCN", "zh-Hans")     // escape hatch, see D5
+    markupPolicy = MarkupPolicy.ERROR            // D4; STRIP/VERBATIM not yet implemented
+    warningsAsErrors = false                     // see below
     kotlinKeys { enabled = true; packageName = "…" }   // optional commonMain keys object
   }
   ```
+
+**`warningsAsErrors` — DECIDED 2026-07-30, defaults to `false`.** The §2.7 diagnostics channel emits warnings for foreign-namespace tags and irregular key names. Teams wanting a strictly clean source tree can escalate them; everyone else gets advisory output. Decided now rather than deferred because adding a DSL property is cheap while the surface is being designed and awkward once published. The default stays `false` so the escalation is opt-in — dotted keys genuinely break Swift symbol generation, but that is a reason to *surface* them, not to fail everyone's build by default.
 
 ### E5. Publishing
 - **(a) Gradle Plugin Portal** (recommended for v0) — canonical discovery for `id("net.sarazan.articulate")`; requires portal account + `net.sarazan` namespace claim. Do the portal-collision check from the hub checklist before naming ships.
@@ -488,6 +500,11 @@ Blocking first; later items can wait until their milestone starts.
 - ✅ **Diagnostics channel** (§2.7): **`convert()` returns warnings alongside the catalog** — closes the two "warn" rules that currently assert only their silent half, and gives m4's task something to log. Corpus gains an optional `expected-warnings.txt`. *Decided 2026-07-30.*
 
 **Milestones 2 and 3 are both fully unblocked.** §2.2–§2.7 and §3.1 carry the merged, research-corrected rules, with `docs/CONVERSIONS.md` as the cited spec of record.
+
+- ✅ **D9 — Gradle/AGP floor** (§E2): **AGP 8.5.2 / Gradle 8.7**, two-cell matrix {floor, AGP 9.1}. Revised down from the original AGP 8.1 proposal because KGP 2.4.10 cannot build a sample below 8.5.2 — an 8.1 floor would have advertised an untestable configuration. *Decided 2026-07-30.*
+- ✅ **D10 — Plugin ID / DSL shape** (§E4): **two plugin IDs**, so only the `.android` plugin carries AGP on its classpath and non-Android consumers never pull it. Plus `warningsAsErrors`, defaulting to `false`. *Decided 2026-07-30.*
+
+**Milestone 4 is unblocked** on decisions. Still required before writing the Gradle shell: the brief's mandate to read ListenUp's production `listenup.localization.gradle.kts` for its configuration-cache and task-output lessons.
 
 ### Still open
 7. **D7 — v0 scope** (§8): milestones 1–5 in v0, Swift lint as v0.1 (recommended). *Hub open question; shapes everything after m3.* **Two research flags:** the m2 corpus grew ~40 → ~65 cases (real added work in the milestone the plan already calls the gate); and m6 should be re-specced to drive off `xcstringstool generate-symbols` output rather than the currently-planned regex scanner — exact instead of heuristic. Timing still correct, design needs revisiting before anyone writes that regex.

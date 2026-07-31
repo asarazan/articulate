@@ -42,6 +42,27 @@ class AndroidLocaleMapperTest {
         "values-zh-rCN" to "zh-Hans",
         "values-zh-rTW" to "zh-Hant",
         "values-zh-rHK" to "zh-Hant-HK",
+        // Audit finding (2026-07-31), NOT a D5a extension: D5a names only
+        // CN/TW/HK, so every other zh-r<region> falls through to plain
+        // language-region formatting -- no script inserted. This is
+        // deliberately pinned here rather than left to drift silently.
+        // `aapt2 dump configurations` (2.19) confirms `values-zh-rSG` and
+        // `values-zh-rMO` are legitimate, distinct AAPT2 configs (not
+        // normalized away or rejected), so a real app could ship one.
+        // Whether they *should* canonicalize to a script is a genuine open
+        // question left for a human: Apple's own
+        // `Locale.Language(identifier:).maximalIdentifier` (Xcode 26.6,
+        // Swift) reports `zh-SG` -> `zh-Hans-SG` and `zh-MO` -> `zh-Hant-MO`
+        // (CLDR likely-subtags), which argues for extending script
+        // canonicalization -- but D5a's own CN/TW/HK table doesn't match any
+        // single CLDR algorithm cleanly (CN/TW drop region, HK keeps it),
+        // and real Apple-shipped apps use inconsistent conventions for Hong
+        // Kong (`zh-HK` and `zh-Hant-HK` both occur on this machine's
+        // /System/Applications), so extending the same asymmetric rule to
+        // SG/MO without a dispositive source risks inventing policy rather
+        // than reading it off evidence. See the milestone-3 audit report.
+        "values-zh-rSG" to "zh-SG",
+        "values-zh-rMO" to "zh-MO",
         // map from the directory name, not an AAPT2-normalized form
         "values-b+es+419" to "es-419",
         // region/script casing normalized
@@ -89,6 +110,33 @@ class AndroidLocaleMapperTest {
     fun `a non-values directory is rejected`() {
         org.junit.jupiter.api.Assertions.assertThrows(AndroidLocaleMapper.LocaleMappingException::class.java) {
             map("drawable-hdpi")
+        }
+    }
+
+    /**
+     * PLAN.md §1.2's determinism rule ("never `toLowerCase()` without
+     * `Locale.ROOT`, Turkish-İ class of bug") applies just as much to this
+     * mapper's casing normalization as to the M1 serializer -- confirmed here
+     * the same way `DeterminismTest` confirms it for serialization. Under a
+     * Turkish default locale, naive `"I".toLowerCase()` produces `ı`
+     * (dotless) instead of `i`; Kotlin's no-arg `lowercase()`/`uppercase()`
+     * are documented to use `Locale.ROOT` regardless. Deliberately exercises
+     * an *uppercase* legacy code containing `I` (`values-IW`) -- a
+     * lowercase-only input such as `values-in` is already a no-op under
+     * `toLowerCase()` for any locale and would not actually detect this bug
+     * (Turkish casing only diverges from root casing on the letter I/i/İ/ı).
+     */
+    @Test
+    fun `casing normalization is unaffected by the JVM default locale (Turkish-I)`() {
+        val previous = java.util.Locale.getDefault()
+        try {
+            java.util.Locale.setDefault(java.util.Locale.forLanguageTag("tr"))
+            assertEquals("pt-BR", map("values-pt-rbr"))
+            assertEquals("he", map("values-IW")) // legacy remap keyed on lowercase "iw" -- breaks under Turkish casing
+            assertEquals("zh-Hans", map("values-zh-rCN"))
+            assertEquals("sr-Latn", map("values-b+sr+Latn"))
+        } finally {
+            java.util.Locale.setDefault(previous)
         }
     }
 

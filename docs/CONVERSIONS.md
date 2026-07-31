@@ -1062,6 +1062,33 @@ New cases this research requires (49):
 `plural-number-in-one-variant-only` · `plural-lld-value-type` · `plural-all-categories` ·
 `error-plural-missing-other` · `xcstrings-json-escaping`
 
+### Added during implementation (not from this research pass)
+
+Milestone 2 added two cases that the research index did not anticipate, both because two spec rules
+interact in a way §12 did not foresee: `xml-entities-quot-toggle` (restores X2's *success* half after
+`xml-entities` itself had to become an error case — see §3a's stale note below) and
+`comments-translation-ignored` (§2.5's "comments in translation files are ignored" had no coverage).
+
+**Milestone 3** (locale mapping, `PLAN.md` §3): `locales-long-tail` (15 directories exercising every
+row of the mapping table end to end) · `error-locale-non-locale-qualifier` (`values-de` +
+`values-de-night`, proving D5b's data-loss collision is caught) · `error-locale-collision-legacy-modern`
+(`values-iw` + `values-he`) · `error-locale-collision-script` (`values-zh-rCN` + `values-b+zh+Hans`).
+
+### Diagnostics channel (`PLAN.md` §2.7)
+
+Two rules in this document specify a **warning** rather than an error — M5 (foreign-namespace tags:
+warn, drop the tag, keep the children) and K1 (irregular key names: warn on `.`/`-`/non-ASCII, which
+break Swift symbol generation *and* `R.` access, while still accepting them). Until milestone 3 there
+was nowhere in `core` to put a warning, so `foreign-namespace-warn` and `key-dot-dash-warn` asserted
+only their silent half and promised coverage that did not exist.
+
+`convert()` now returns the catalog *and* an ordered list of diagnostics. The corpus gained an
+optional `expected-warnings.txt` per case, matched by required substrings exactly as
+`expected-error.txt` is — and a case **without** that file asserts **zero** diagnostics, so the format
+cannot silently tolerate a warning appearing anywhere. That rule immediately found a real gap:
+`key-unicode` had been quietly accepting a K1 warning nobody had noticed, because K1 fires on
+non-ASCII keys too.
+
 ---
 
 ## 13. Reproducing this research
