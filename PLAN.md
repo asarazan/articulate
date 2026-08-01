@@ -650,13 +650,13 @@ Research adds one supporting argument: AAPT2's `ParseArrayImpl` accepts a genera
 Note: comment passthrough is *in* v0 because the brief settles catalog `comment` population (see flag F1).
 
 ### D8. SwiftPM story — DECIDED (2026-07-31): docs only — **but flagged to revisit**
-**Ruled: `docs/swiftpm.md`, no v0 code.** Ruled with explicitly incomplete understanding, so this is *provisional in a way the other decisions are not* — revisit before v0 publishes, and again if anyone reports hitting it.
+**Ruled: `docs/swiftpm.md`, no v0 code.** *(Deliverable written 2026-08-01; writing it corrected the first row of the table below — the ruling stands, its stated reasons partly did not.)* Ruled with explicitly incomplete understanding, so this is *provisional in a way the other decisions are not* — revisit before v0 publishes, and again if anyone reports hitting it.
 
 Precisely what is and isn't broken, since "SwiftPM support" bundles three separable things:
 
 | Part | Status |
 |---|---|
-| Runtime lookup of a bundled catalog | **Probably fine** — SwiftPM processes localization resources. *Not verified end to end.* |
+| Runtime lookup of a bundled catalog | **CORRECTED 2026-08-01 — BROKEN, and silently.** Verified: `swift build` copies the `.xcstrings` into the bundle **uncompiled** (no `.lproj`, no `.strings`) and `String(localized:)` returns the *key*. Control: adding `xcstringstool`-compiled `.lproj` output beside it fixes it on the next run, nothing else changed. **The diagnosis below was also wrong** — this ran on a machine with Xcode and a working `xcstringstool`, so reachability is not the cause; SwiftPM's resource pipeline has no `.xcstrings` rule at all. See `docs/swiftpm.md`. |
 | **Typed symbol generation** (`Text(.Shared.key)`) | **Genuinely broken** under standalone `swift build`. `xcstringstool` lives in `Xcode.app/Contents/Developer/usr/bin/`, not the Swift toolchain — verified. |
 | Compilation to `.strings`/`.stringsdict` | Same tool, same unreachability. |
 

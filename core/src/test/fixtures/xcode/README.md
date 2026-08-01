@@ -1,5 +1,17 @@
 # Xcode observed-behavior fixture
 
+> **`RoundTripTest` was deleted 2026-08-01, not forgotten.** It was an
+> `@Disabled` placeholder waiting on `opened.xcstrings` and an `XcstringsReader`,
+> neither of which was ever built — and neither is now needed. Its claim ("we
+> reproduce an Xcode-produced catalog byte-for-byte") was settled more strongly
+> by the `xcstringstool sync` round-trip recorded below, which checks every
+> `CanonicalFormat` constant against Apple's own tool rather than against one
+> checked-in sample. The reader it required was speculative: the drift gate
+> compares bytes and never parses a catalog. A permanently disabled test is a
+> claim that decays silently, so it is gone rather than left to look like
+> pending work.
+
+
 **Mostly obsolete as of 2026-07-31.** This protocol assumed the only way to
 observe Xcode's canonical serialization was a human opening a catalog in the
 GUI and saving it. That turned out to be false: **`xcstringstool sync` rewrites
