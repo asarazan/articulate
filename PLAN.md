@@ -449,6 +449,48 @@ Applied in the **app** module (settled). This also sidesteps the brief's AGP-9 c
 
 Never write into `src/*/res`; never use the legacy `sourceSets["main"].res.srcDir` (both settled).
 
+#### REDESIGN REQUIRED — the cross-project task lookup is release-blocking
+
+The wiring above resolves the producing task by reaching into another project's task container:
+
+```kotlin
+i18nProject.tasks.named("generateAndroidRes", GenerateAndroidResTask::class.java)
+```
+
+That single line causes **two** failures with one root cause, and both must be fixed before publishing:
+
+1. **It breaks in the most natural consumer layout.** When `:i18n` and `:app` each declare their plugins in their own `plugins {}` block with versions — Android Studio's default template shape — configuration fails with `InvalidUserDataException: The task 'generateAndroidRes' (…GenerateAndroidResTask) is not a subclass of the given type (…GenerateAndroidResTask)`. The same fully-qualified name on both sides: two `Class` objects from two classloaders. Gradle keys a plugin classloader on the *set* of jars a script requests, and `:app` requests ours **+ AGP** while `:i18n` requests ours alone. The friendly `UnknownTaskException` handler never fires, because this is a different exception type.
+2. **It is rejected outright by isolated projects** — `Cannot access project ':i18n' from project ':app'`, attributed to `com.android.internal.application` since it fires inside AGP's callback, so a user has no reason to suspect Articulate. AGP itself is isolated-projects-clean (verified 2026-08-01), so this is ours.
+
+**Why the test suite is blind to it.** Every functional test uses `GradleRunner.withPluginClasspath()`, which injects **one** classpath for the whole fixture — a single classloader, so cross-project class identity always holds. The failing shape is *structurally unreachable* through TestKit's default injection. 236 passing tests said nothing about the artifact users download.
+
+##### What must be true of the replacement
+
+These are requirements, not a design. Any mechanism satisfying them is acceptable.
+
+- **No cross-project access at configuration time.** `:app` must not call `project.project(path)`, `evaluationDependsOn`, or touch another project's task container, extensions, or properties.
+- **No class identity compared across plugin classloaders.** No `tasks.named(name, SomeType::class.java)` against a task another project's classloader created, and no `SomeType::property` method reference across that boundary either.
+- **Task dependencies must be carried implicitly** by whatever mechanism replaces it — `:app` building must build `:i18n`'s generation without anyone declaring `dependsOn`.
+- **Configuration cache must still be *reused*** (not merely stored) on a second run, and the existing assertion on the literal `"Configuration cache entry reused."` must still hold.
+- **Both AGP cells keep working** — 8.5.2 relocates the generated directory into `:app`'s build tree, 9.1 reads it in place (§4.4). Whatever replaces this must be indifferent to that difference.
+- **Applying both plugins to one module must not deadlock or produce a raw Gradle error** (today: `CircularReferenceException` naming nothing about Articulate).
+
+##### Recommended mechanism — *unverified, validate before building on it*
+
+`:i18n` exposes the generated tree as a **consumable configuration** carrying an attribute (e.g. `articulate-android-res`), with the generation task's output directory as its outgoing artifact. `:app` declares a **resolvable** configuration with matching attributes and a dependency on the i18n project, then resolves it. That is dependency resolution rather than project-container access — permitted under isolated projects, and it carries task dependencies implicitly.
+
+The wrinkle: `addGeneratedSourceDirectory(taskProvider, wiredWith)` needs a `TaskProvider` **in the consuming project**, so `:app` likely needs a small per-variant task that takes the resolved artifact as input and produces a directory as output. That task is created by `:app`'s own plugin instance, so no class crosses a classloader boundary.
+
+**I have not prototyped this.** It is the conventional Gradle answer and it satisfies the requirements on paper, but this project has repeatedly found that reasoning-from-documentation about AGP and Gradle internals is unreliable. **Validate the approach on a minimal case before building the full implementation**, and report rather than improvise if it does not hold.
+
+##### The regression test is the hard part — and non-negotiable
+
+A fix that cannot be proven is worthless here, and **the existing test infrastructure structurally cannot reproduce this bug.** The regression test must create genuinely distinct plugin classloaders, which means consuming the plugin **as a published artifact**: publish to a local repository, then a fixture with `pluginManagement { repositories { … } }` and per-module `plugins { id("…") version "…" }`, with `:app` also requesting AGP in its own block.
+
+Verify the test fails against the current implementation before accepting that it passes against the new one. A test that passes both ways proves nothing.
+
+Reproduction that is known to fail today is recorded in §13.
+
 ### 4.6 Configuration-cache rules — non-negotiable, and the reason M4's audit is Opus
 
 Config-cache violations are the archetypal silent failure: everything works until someone enables the cache, then breaks confusingly and far from the cause.
