@@ -475,13 +475,24 @@ These are requirements, not a design. Any mechanism satisfying them is acceptabl
 - **Both AGP cells keep working** — 8.5.2 relocates the generated directory into `:app`'s build tree, 9.1 reads it in place (§4.4). Whatever replaces this must be indifferent to that difference.
 - **Applying both plugins to one module must not deadlock or produce a raw Gradle error** (today: `CircularReferenceException` naming nothing about Articulate).
 
-##### Recommended mechanism — *unverified, validate before building on it*
+##### Mechanism — **VERIFIED by prototype 2026-08-01**
 
 `:i18n` exposes the generated tree as a **consumable configuration** carrying an attribute (e.g. `articulate-android-res`), with the generation task's output directory as its outgoing artifact. `:app` declares a **resolvable** configuration with matching attributes and a dependency on the i18n project, then resolves it. That is dependency resolution rather than project-container access — permitted under isolated projects, and it carries task dependencies implicitly.
 
 The wrinkle: `addGeneratedSourceDirectory(taskProvider, wiredWith)` needs a `TaskProvider` **in the consuming project**, so `:app` likely needs a small per-variant task that takes the resolved artifact as input and produces a directory as output. That task is created by `:app`'s own plugin instance, so no class crosses a classloader boundary.
 
-**I have not prototyped this.** It is the conventional Gradle answer and it satisfies the requirements on paper, but this project has repeatedly found that reasoning-from-documentation about AGP and Gradle internals is unreliable. **Validate the approach on a minimal case before building the full implementation**, and report rather than improvise if it does not hold.
+**Prototyped on a minimal two-module build before speccing** (`producer` exposing a generated directory, `consumer` resolving it), with `isolated-projects=true` and `configuration-cache=true`:
+
+| Property required | Prototype result |
+|---|---|
+| Resolves across projects | ✅ producer's generation task ran automatically — **task dependency carried implicitly**, no `dependsOn` |
+| Survives isolated projects | ✅ built clean; the incubating-feature banner confirms the flag was genuinely active |
+| Config cache **reused**, not merely stored | ✅ second run printed `Configuration cache entry reused.` |
+| **Control — the current pattern still fails** | ✅ adding `project.project(":producer")` to the same build → `BUILD FAILED` |
+
+The control row is what makes the others meaningful: it proves the flag actually enforces, so success is not a silently-ignored setting. Artifact declared as `artifacts { add(config, task.flatMap { it.outDir }) { builtBy(task) } }`; consumer wires `incoming.from(configuration)` into an `@InputFiles` property.
+
+Still to establish in the real implementation: that this composes with `addGeneratedSourceDirectory` across **both** AGP cells, since the consuming task must produce the `DirectoryProperty` AGP wires to.
 
 ##### The regression test is the hard part — and non-negotiable
 
@@ -490,6 +501,8 @@ A fix that cannot be proven is worthless here, and **the existing test infrastru
 Verify the test fails against the current implementation before accepting that it passes against the new one. A test that passes both ways proves nothing.
 
 Reproduction that is known to fail today is recorded in §13.
+
+**Try the checked-in sample as the regression vehicle first.** §14's sample already needs per-module `plugins {}` blocks to be realistic, and a composite build (`includeBuild("..")`) may produce the same distinct-classloader split as a published artifact — in which case one artifact serves as demo, integration test, and regression test at once. Verify it actually reproduces the failure before relying on it; fall back to publishing into a build-local repository if it does not.
 
 ### 4.6 Configuration-cache rules — non-negotiable, and the reason M4's audit is Opus
 
