@@ -39,6 +39,10 @@ Each of these exists because it caught something real. They are not style prefer
 
 **Write no test that cannot fail.** This repo has shipped assertions satisfied by their own fixture name (`no_comment`), by their own directory path (`error-string-precision`), by a no-op input (a Turkish-locale test using an already-lowercase string), and by a single-item case where "lists all" and "lists the first" are indistinguishable. When a new test passes on the first run, **prove it can fail**: mutate the production code, watch it break, revert. `CorpusTest` has a guard against the path-substring class — if it fires, the assertion is too weak; do not work around it.
 
+**Ask what shape of bug your harness cannot express.** The most expensive defect in this project — a release-blocking classloader failure in the most common consumer layout — was invisible to 236 passing tests, because every functional test used `GradleRunner.withPluginClasspath()`, which injects one classpath for the whole fixture. The failing shape was *structurally unreachable* through the test infrastructure. Comprehensive coverage of a configuration no user has is worth nothing. Periodically ask: what does my harness make impossible to observe, and does a real user live there?
+
+**Prove a regression test red before accepting it green.** For any test written to pin a specific bug: back up the fix, confirm the test fails without it, restore, confirm it passes. A test that passes both ways proves nothing, and it is indistinguishable from a real one once committed.
+
 **A green build that skipped its hardest tests is not green.** The entire golden corpus was once invisible to Gradle's up-to-date checking, so editing a fixture left `:core:test` UP-TO-DATE and the change never ran. Silence is not success.
 
 **Never hand-type byte-exact expected output.** Generate fixtures from verified program output, inspect with `xxd`/`cat -e`, then delete the generator. Hand-transcribing nested JSON or control characters is how expectation bugs get committed.
@@ -60,6 +64,12 @@ Each of these exists because it caught something real. They are not style prefer
 **Commit a pre-audit checkpoint** before auditing, so the audit's effect is a readable diff rather than blended into the implementation.
 
 **Demand honest reports.** "These twelve cases are unwritten" is far more useful than a completeness claim an audit then contradicts. Ask explicitly what was *not* verified.
+
+**Never bundle a tightly-specified task with an exploratory one in the same agent.** A precise fix and a loosely-sketched build have different failure modes, and combining them makes progress illegible from outside — you cannot tell whether a long run means the hard part is hard or the fuzzy part is drifting. Split them, even when they touch the same area. The cost is one extra handoff; the benefit is that elapsed time means something.
+
+**Prototype an unproven mechanism yourself before specifying it.** When a design rests on framework behavior nobody here has run, build the minimal case first and spec from the result. Specifying a mechanism you have only reasoned about produces confident text that may be wrong — and downstream nobody can tell which sentences were verified. Mark what the prototype could *not* establish, so the implementer knows where the real risk is.
+
+**A prototype needs a control.** Confirming the new approach works proves little on its own — the flag may be ignored, the check may not be running. Also verify that the *old* approach still fails under the same conditions. That is what turns "it worked" into evidence.
 
 ## Conventions
 

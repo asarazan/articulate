@@ -46,6 +46,16 @@ general code quality (other reviewers do that), but spec fidelity.
    removed its own test rather than ship one carrying a false rationale. Do
    that. A test justified by a wrong reason misleads the next reader.
 
+8. **Ask what the test harness cannot express.** Coverage answers "is this
+   tested"; it never answers "could this harness even observe the failure?"
+   This project's most expensive defect was release-blocking, sat in the most
+   common consumer layout, and was invisible to 236 passing tests because every
+   functional test injected a single classpath — the failing shape was
+   structurally unreachable. When a suite is comprehensive and green, ask which
+   real-world configuration it structurally cannot reproduce, and whether
+   anyone lives there. **Consume the artifact the way a user would**, not the
+   way the test harness does.
+
 ## Mechanical sweep (always run, repo-wide over production sources)
 
 - Raw control bytes embedded in source literals: `LC_ALL=C grep -n '[^ -~]'`
