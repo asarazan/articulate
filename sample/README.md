@@ -72,3 +72,33 @@ cd sample
 Needs an Android SDK (`ANDROID_HOME` or `local.properties`) with
 `platforms;android-34` and `build-tools;34.0.0`, matching the plugin's own
 D9 floor cell.
+
+## Opening this in Android Studio
+
+**Open `sample/` itself, not the repository root.** The root build deliberately
+excludes this project — `sample/` is a separate composite build that includes the
+root *back* via `pluginManagement { includeBuild("..") }`, which is what makes it
+consume the plugin under development rather than a published artifact.
+
+Open the repo root instead and these `build.gradle.kts` files show unresolved
+references (`articulate { }`, `sourceLanguage`, `ios { }`) — Studio has no Gradle
+model for them, because they belong to a build it was never told about. The files
+are fine; the IDE simply has nothing to resolve against.
+
+It has its own wrapper, so it builds standalone:
+
+```bash
+cd sample
+./gradlew :androidApp:assembleDebug     # produces an APK
+./gradlew :i18n:generateStrings         # regenerate both outputs
+./gradlew :i18n:verifyStrings           # the drift gate
+```
+
+You need an Android SDK. Studio writes `local.properties` on first open; from the
+command line, export `ANDROID_HOME` or create it yourself. That file is gitignored
+— it is machine-specific and must never be committed.
+
+The first build is slow — Kotlin Multiplatform resolves a great deal on first
+contact. `gradle.properties` raises the daemon heap because the default is not
+enough for KMP + AGP + a composite build together: without it, a clean build dies
+with `OutOfMemoryError` and leaves a ~370MB `.hprof` dump behind.

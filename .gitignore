@@ -1,6 +1,8 @@
 # Gradle
 .gradle/
 build/
+# JVM heap dumps -- Gradle writes these on OOM and they are enormous
+*.hprof
 
 # IDE
 .idea/
