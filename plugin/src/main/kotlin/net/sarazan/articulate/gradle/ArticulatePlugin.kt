@@ -7,6 +7,7 @@ import net.sarazan.articulate.gradle.tasks.VerifyStringsTask
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.tasks.SourceSetContainer
 
 /** Task group every Articulate task registers under, for `./gradlew tasks` grouping. */
 internal const val ARTICULATE_TASK_GROUP = "articulate"
@@ -54,6 +55,35 @@ class ArticulatePlugin : Plugin<Project> {
                         "MarkupPolicy.ERROR is supported in v0. See PLAN.md §2.2's D4 ruling. Remove the " +
                         "markupPolicy override or set it to MarkupPolicy.ERROR.",
                 )
+            }
+        }
+
+        // IDE visibility. A module applying only this plugin registers ZERO
+        // source sets, so Android Studio's *Android* view renders it as an
+        // empty module -- no expand arrow, no strings.xml. Project view always
+        // showed the tree; the default view did not, which is what a new user
+        // sees first. Since the whole authoring story is "hand-edit
+        // strings.xml the way you would in Android", a strings tree the
+        // default view cannot display is an adoption problem, not a cosmetic
+        // one. `java-base` supplies a SourceSetContainer with no jar and no
+        // assemble wiring; registering stringsDir as a resource root is what
+        // puts the tree into the IDE model. Uses the extension property, not
+        // the literal path, so an overridden stringsDir stays correct.
+        //
+        // Gated on nothing else already modelling sources: an Android or KMP
+        // module renders fine and neither needs nor wants a spare Java source
+        // set. afterEvaluate because *absence* can only be judged once the
+        // consumer's whole plugins {} block has run -- plugin order within it
+        // is not ours to assume.
+        project.afterEvaluate {
+            val alreadyModelled = project.extensions.findByName("sourceSets") != null ||
+                project.extensions.findByName("android") != null ||
+                project.extensions.findByName("kotlin") != null
+            if (!alreadyModelled) {
+                project.pluginManager.apply("java-base")
+                project.extensions.getByType(SourceSetContainer::class.java).create("strings") { sourceSet ->
+                    sourceSet.resources.srcDir(extension.stringsDir)
+                }
             }
         }
 

@@ -381,6 +381,18 @@ Content-keying is also more robust on its own terms: it cannot be fooled by some
 
 Error wording must say **"not yet supported"**, since that message is the migration signal users actually read.
 
+#### IDE visibility of the strings tree — ADDED 2026-08-01, VERIFIED (Android Studio, `sample/`, both mechanism and shipped form)
+
+**A module applying only `net.sarazan.articulate` registered zero source sets, so Android Studio's *Android* view — the default — rendered `:i18n` as an empty module: no expand arrow, no `strings.xml`.** The files were on disk and the build read them fine; Project view showed them. Only the default view was blind, which is the one a new user sees first.
+
+This matters more than it looks. The entire authoring story is *hand-edit `strings.xml` the way you would in Android*. A strings tree the default IDE view cannot display is an adoption problem, not a cosmetic one — and it is invisible to a build that works perfectly.
+
+**The plugin applies `java-base` and registers a `strings` source set whose resources point at the configured `stringsDir`.** `java-base` supplies a `SourceSetContainer` without a jar or `assemble` wiring, which is the lightest thing that puts a tree into the model an IDE reads. It uses the **extension property, not the literal path**, so an overridden `stringsDir` moves the IDE root with it — a hardcoded convention path would have been an IDE root aimed at a directory the build ignores.
+
+**Gated on nothing else already modelling sources** (`sourceSets` / `android` / `kotlin` extensions absent), in `afterEvaluate` because *absence* can only be judged once the consumer's whole `plugins {}` block has run. An Android or KMP module renders correctly unaided and gets nothing added.
+
+**Verification status: VERIFIED, with one permanent gap.** What was confirmed in Android Studio by hand was the *mechanism* — `java-base` plus a source set, declared eagerly in `sample/i18n/build.gradle.kts`: `sample/i18n` populated in the Android view once a source set existed. **The shipped form differs in shape** — plugin-side, in `afterEvaluate`, gated on other plugins' absence — so it was re-confirmed separately rather than inferred from the prototype: `:i18n` still populates in the Android view with the sample's own build file back to four lines, which is the only evidence that the *plugin* does this rather than a local hack. Both confirmations were human; neither was inferred. The three claims that *are* machine-checkable are pinned by `IdeSourceSetFunctionalTest`, each mutation-proven to fail independently: registration happens, it follows an overridden `stringsDir`, and the gate leaves a `java` module alone. **What no test covers is "Studio renders it"** — TestKit has no IDE model. That step is human, and it is the third time in this project a defect has lived exactly where the harness cannot look.
+
 ### 4.4 `generateStrings`
 
 **DECIDED 2026-07-30: two typed tasks plus an aggregate.** The two outputs have genuinely different lifecycles — the Android res tree is disposable and regenerated every build, the catalog is committed and should change only when strings change — so collapsing them into one task produces something that is never cleanly up-to-date.
