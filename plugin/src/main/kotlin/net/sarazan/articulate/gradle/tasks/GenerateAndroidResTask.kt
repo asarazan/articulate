@@ -80,9 +80,13 @@ abstract class GenerateAndroidResTask : DefaultTask() {
         outDir.deleteRecursively()
         outDir.mkdirs()
 
-        val localeDirs = sourceDir.listFiles { f -> f.isDirectory }.orEmpty()
-            .filter { it.name == "values" || it.name.startsWith("values-") }
-            .filter { File(it, "strings.xml").isFile }
+        // §4.3: discovery/classification lives in core, not here -- this task
+        // used to filter for "values*/strings.xml" itself, which is exactly
+        // how a companion plurals.xml/arrays.xml got silently dropped with no
+        // error. AndroidToXcstringsConverter.convert() above already threw if
+        // any such file exists; this just reuses the same validated list
+        // rather than re-deriving it independently.
+        val localeDirs = AndroidToXcstringsConverter.discoverLocaleDirectories(sourceDir)
 
         for (dir in localeDirs) {
             val targetDir = File(outDir, dir.name).apply { mkdirs() }

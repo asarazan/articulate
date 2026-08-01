@@ -1,0 +1,5 @@
+plurals.xml
+<plurals>
+cart_item_count
+not yet supported
+into strings.xml

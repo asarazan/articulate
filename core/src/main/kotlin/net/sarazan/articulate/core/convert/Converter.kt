@@ -13,6 +13,7 @@ import net.sarazan.articulate.core.parse.AndroidStringsParser
 import net.sarazan.articulate.core.parse.ConversionException
 import net.sarazan.articulate.core.parse.ParsedFile
 import net.sarazan.articulate.core.parse.ParsedResource
+import net.sarazan.articulate.core.parse.ValuesFileClassifier
 import net.sarazan.articulate.core.parse.XmlPosition
 import java.io.File
 
@@ -58,14 +59,7 @@ object AndroidToXcstringsConverter {
         sourceLanguage: String = "en",
         localeOverrides: Map<String, String> = emptyMap(),
     ): ConversionResult {
-        val localeDirs = inputDir.listFiles { f -> f.isDirectory }.orEmpty()
-            .sortedBy { it.name }
-            .mapNotNull { dir ->
-                val xml = File(dir, "strings.xml")
-                if (!xml.isFile) return@mapNotNull null
-                if (dir.name != "values" && !dir.name.startsWith("values-")) return@mapNotNull null
-                dir to xml
-            }
+        val localeDirs = discoverLocaleDirectories(inputDir).map { dir -> dir to File(dir, "strings.xml") }
 
         val mapped: List<Triple<LocaleTag, File, File>> = localeDirs.map { (dir, xml) ->
             val tag = try {
@@ -112,6 +106,45 @@ object AndroidToXcstringsConverter {
 
         val diagnostics = localeFiles.flatMap { it.second.diagnostics }
         return ConversionResult(StringCatalog(sourceLanguage = sourceLanguage, entries = entries), diagnostics)
+    }
+
+    /**
+     * PLAN.md §4.3: every `values`/`values-<tag>` subdirectory of [inputDir]
+     * that supplies a `strings.xml`, after every *other* `*.xml` file in
+     * each such directory has been classified by [ValuesFileClassifier] --
+     * which throws if any of them declares localizable content under a name
+     * other than `strings.xml` (the original silent-loss bug this guards
+     * against: discovery hardcoded to `strings.xml` silently dropped
+     * `plurals.xml`/`arrays.xml` split files), and silently accepts genuine
+     * presentation resources (`colors.xml`, `dimens.xml`, ...).
+     *
+     * Classification runs over *every* `values`/`values-<tag>` directory,
+     * not only ones that happen to contain a `strings.xml` -- a directory
+     * holding only e.g. `marketing.xml` with `<string>`s in it must still be
+     * caught, rather than silently skipped the way "no strings.xml here"
+     * used to skip it.
+     *
+     * Exposed (not `private`) so callers outside this function -- chiefly
+     * `GenerateAndroidResTask` in `plugin`, which copies each
+     * already-validated `strings.xml` byte-for-byte into a disposable
+     * output tree -- delegate here instead of re-deriving this list
+     * themselves. Reimplementing this filter independently, without the
+     * classification step, is exactly how the original bug happened:
+     * `GenerateAndroidResTask` filtered for `strings.xml` on its own and
+     * silently copied nothing else.
+     */
+    fun discoverLocaleDirectories(inputDir: File): List<File> {
+        val valuesDirs = inputDir.listFiles { f -> f.isDirectory }.orEmpty()
+            .sortedBy { it.name }
+            .filter { it.name == "values" || it.name.startsWith("values-") }
+
+        for (dir in valuesDirs) {
+            dir.listFiles { f -> f.isFile && f.name != "strings.xml" && f.extension == "xml" }.orEmpty()
+                .sortedBy { it.name }
+                .forEach(ValuesFileClassifier::checkNotLocalizable)
+        }
+
+        return valuesDirs.filter { File(it, "strings.xml").isFile }
     }
 
     /**

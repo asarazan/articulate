@@ -115,11 +115,14 @@ class CorpusTest {
 
         // PLAN.md §2.1: "messages must name the file, the key, and the fix". The
         // file half is universal, so it is enforced here for every error case rather
-        // than left to each expected-error.txt to remember.
-        val inputFiles = inputDir.walkTopDown().filter { it.name == "strings.xml" }.map { it.path }.toList()
-        check(inputFiles.isNotEmpty()) { "corpus case '$name': no input strings.xml found" }
+        // than left to each expected-error.txt to remember. Matched by extension, not
+        // literally "strings.xml": §4.3's multi-file classifier can fail on a
+        // companion file (plurals.xml, or a content file misnamed marketing.xml)
+        // that is never named strings.xml at all.
+        val inputFiles = inputDir.walkTopDown().filter { it.isFile && it.extension.equals("xml", ignoreCase = true) }.map { it.path }.toList()
+        check(inputFiles.isNotEmpty()) { "corpus case '$name': no input XML files found" }
         assertTrue(inputFiles.any { message!!.contains(it) }) {
-            "corpus case '$name': error message names none of the input files $inputFiles -- " +
+            "corpus case '$name': error message names none of the input XML files $inputFiles -- " +
                 "PLAN.md §2.1 requires every failure to name the file.\nActual message: $message"
         }
     }

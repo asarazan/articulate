@@ -257,4 +257,69 @@ class GenerateTasksFunctionalTest {
 
         assertTrue(result.output.contains("BUILD SUCCESSFUL"))
     }
+
+    /**
+     * PLAN.md §4.3: the silent-loss bug this milestone fixes. Splitting
+     * `values/strings.xml` and `values/plurals.xml` is ordinary Android
+     * practice -- Android's resource merger folds both into the same
+     * string table -- so a companion file that actually carries
+     * localizable content must fail the build loudly, not get silently
+     * dropped from the generated output. Exercised through the real Gradle
+     * task graph (not just `core`'s corpus), so a regression that only
+     * shows up in how `GenerateAndroidResTask`/`GenerateXcstringsTask` wire
+     * up `AndroidToXcstringsConverter` -- e.g. discovery reverting to its
+     * own independent `File` filtering -- is caught here too.
+     */
+    @Test
+    fun `a companion file that actually declares localizable content fails generateStrings`() {
+        File(projectDir.toFile(), "src/main/strings/values/plurals.xml").writeText(
+            """
+            <resources>
+                <plurals name="cart_item_count">
+                    <item quantity="one">%1${'$'}d item</item>
+                    <item quantity="other">%1${'$'}d items</item>
+                </plurals>
+            </resources>
+            """.trimIndent(),
+        )
+
+        val result = runner(projectDir, "generateStrings").buildAndFail()
+
+        assertTrue(
+            result.output.contains("plurals.xml") &&
+                result.output.contains("not yet supported") &&
+                result.output.contains("cart_item_count"),
+            "expected the failure to name plurals.xml, 'not yet supported', and the offending key:\n${result.output}",
+        )
+        assertFalse(result.output.contains("BUILD SUCCESSFUL"))
+    }
+
+    /**
+     * The companion case: a presentation-only file (`colors.xml`, exactly
+     * what a real `app/src/main/res/values/` directory routinely holds)
+     * must not break the build -- and, specifically for
+     * `generateAndroidRes`, must not leak into the generated output tree
+     * either. Only `strings.xml` is ever copied; `colors.xml` living
+     * alongside it in source is silently irrelevant to this task.
+     */
+    @Test
+    fun `a presentation-only companion file like colors xml is ignored and never copied into the generated res tree`() {
+        File(projectDir.toFile(), "src/main/strings/values/colors.xml").writeText(
+            """
+            <resources>
+                <color name="colorPrimary">#FFFFFF</color>
+            </resources>
+            """.trimIndent(),
+        )
+
+        val result = runner(projectDir, "generateStrings").build()
+        assertEquals(TaskOutcome.SUCCESS, result.task(":generateAndroidRes")!!.outcome)
+
+        val generatedValuesDir = File(projectDir.toFile(), "build/generated/i18n/res/values")
+        assertTrue(File(generatedValuesDir, "strings.xml").isFile, "expected strings.xml to still be generated")
+        assertFalse(
+            File(generatedValuesDir, "colors.xml").exists(),
+            "colors.xml is presentation-only and must never be copied into the generated Android res tree",
+        )
+    }
 }

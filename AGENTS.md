@@ -15,6 +15,18 @@ export ARTICULATE_REQUIRE_ANDROID_SDK=true   # what CI sets; makes a missing SDK
 
 Gradle writes to `~/.gradle`, so it needs the sandbox disabled. Android and Gradle-floor tests are slow — that is expected, not a hang.
 
+## If you are an agent working in this repo, this applies to you
+
+**Run no `git` command at all.** Not `add`/`commit`/`push`, and not `checkout`/`restore`/`reset`/`stash`/`clean`/`diff`/`status`/`log` either — read-only ones included, deliberately.
+
+The tree you are working in is usually **uncommitted**, so a reflexive `git checkout -- file` to undo a mutation test can destroy work that exists nowhere else. Two agents have now breached this; in both cases it was harmless, which is exactly why the rule is absolute rather than judgment-based — the harmful and harmless cases look identical while you are typing them.
+
+- To revert a mutation test: `cp` the file to a backup first, `cp` it back.
+- To inspect state: Read and Glob.
+- To know what changed: say so in your report and let the human look.
+
+A human reviews and commits. An automated pass must never certify itself into history, and must never be the reason work is lost.
+
 ## The rules that have actually caught bugs here
 
 Each of these exists because it caught something real. They are not style preferences.
@@ -46,8 +58,6 @@ Each of these exists because it caught something real. They are not style prefer
 **Give the implementer the oracle**, not just the spec. See above.
 
 **Commit a pre-audit checkpoint** before auditing, so the audit's effect is a readable diff rather than blended into the implementation.
-
-**Agents must run no `git` command at all** — not `add`/`commit`/`push`, and not `checkout`/`restore`/`reset`/`stash`/`clean`/`diff`/`status`/`log`. The tree they work in is usually uncommitted, so a reflexive `git checkout -- file` can destroy work that exists nowhere else. To revert a mutation test: `cp` to a backup first, `cp` back. To inspect: Read and Glob.
 
 **Demand honest reports.** "These twelve cases are unwritten" is far more useful than a completeness claim an audit then contradicts. Ask explicitly what was *not* verified.
 

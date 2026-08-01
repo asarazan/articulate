@@ -1,0 +1,5 @@
+marketing.xml
+<string>
+tagline
+not yet supported
+into strings.xml
