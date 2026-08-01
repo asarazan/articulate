@@ -27,6 +27,8 @@ The tree you are working in is usually **uncommitted**, so a reflexive `git chec
 
 A human reviews and commits. An automated pass must never certify itself into history, and must never be the reason work is lost.
 
+**Whoever does commit: read what you staged, every time.** `git add -A` after a build sweeps up whatever the build dropped. A 373MB JVM heap dump reached a commit that way and was stopped only by GitHub's file-size hook — not by anything in this repo. List the staged paths and size-check anything binary *before* committing, not after a rejected push. This applies to the orchestrator too; it is easy to enforce on agents and forget for yourself.
+
 ## The rules that have actually caught bugs here
 
 Each of these exists because it caught something real. They are not style preferences.
@@ -41,7 +43,11 @@ Each of these exists because it caught something real. They are not style prefer
 
 **Ask what shape of bug your harness cannot express.** The most expensive defect in this project — a release-blocking classloader failure in the most common consumer layout — was invisible to 236 passing tests, because every functional test used `GradleRunner.withPluginClasspath()`, which injects one classpath for the whole fixture. The failing shape was *structurally unreachable* through the test infrastructure. Comprehensive coverage of a configuration no user has is worth nothing. Periodically ask: what does my harness make impossible to observe, and does a real user live there?
 
+The same shape recurred within a day: `sample/` shipped with no Gradle wrapper, so it could not be opened in an IDE or built by hand — invisible because the test drives it through TestKit, which needs neither. **Where automation and a human take different paths to the same artifact, only the automation path is under test.** Walk the human path yourself at least once.
+
 **Prove a regression test red before accepting it green.** For any test written to pin a specific bug: back up the fix, confirm the test fails without it, restore, confirm it passes. A test that passes both ways proves nothing, and it is indistinguishable from a real one once committed.
+
+**Do not explain a failure you have not diagnosed.** A first sample build failed and was described as "transient resolution failures, re-run it" — the 373MB heap dump it left behind said `OutOfMemoryError`. The evidence was on disk and the explanation was invented to move past it. Wrong diagnoses are worse than "I don't know yet": this one would have shipped a sample whose first impression is a crash, documented as normal. Read the artifacts a failure leaves — dumps, reports, exit codes — before narrating a cause.
 
 **A green build that skipped its hardest tests is not green.** The entire golden corpus was once invisible to Gradle's up-to-date checking, so editing a fixture left `:core:test` UP-TO-DATE and the change never ran. Silence is not success.
 
