@@ -5,6 +5,14 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
 }
 
+// Publishing coordinates. 0.1.0 deliberately, not 1.0.0: `markupPolicy` accepts
+// values whose implementations are deferred (D4) and the isolated-projects
+// incompatibility (PLAN.md §13) is a tracked redesign. 0.x is the honest signal.
+// Set per-module rather than via allprojects{} -- the root script forbids
+// cross-project configuration precisely because it breaks project isolation.
+group = "net.sarazan.articulate"
+version = "0.1.0"
+
 kotlin {
     // Pins the compile JDK independently of whatever JDK launches Gradle.
     jvmToolchain(17)

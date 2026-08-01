@@ -15,6 +15,7 @@ import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
+import org.gradle.api.tasks.UntrackedTask
 
 /**
  * PLAN.md §5: the drift gate. **Declares inputs only, never outputs**, so it
@@ -32,6 +33,12 @@ import org.gradle.api.tasks.TaskAction
  * without the structural added/removed/changed-key diff §5 describes as a
  * "diagnostic nicety" rather than part of the gate's guarantee.
  */
+@UntrackedTask(
+    because = "A drift gate must re-verify on every invocation. PLAN.md §5 requires it " +
+        "never report UP-TO-DATE; declaring no outputs achieves that only incidentally, " +
+        "whereas this states the intent and lets Gradle enforce it. Re-running is cheap: " +
+        "the check is pure in-memory conversion plus a byte comparison.",
+)
 abstract class VerifyStringsTask : DefaultTask() {
 
     @get:InputDirectory

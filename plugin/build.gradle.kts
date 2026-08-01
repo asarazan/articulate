@@ -12,7 +12,16 @@ import org.gradle.plugin.devel.tasks.PluginUnderTestMetadata
 plugins {
     alias(libs.plugins.kotlin.jvm)
     `java-gradle-plugin`
+    alias(libs.plugins.plugin.publish)
 }
+
+// Publishing coordinates. 0.1.0 deliberately, not 1.0.0: `markupPolicy` accepts
+// values whose implementations are deferred (D4) and the isolated-projects
+// incompatibility (PLAN.md §13) is a tracked redesign. 0.x is the honest signal.
+// Set per-module rather than via allprojects{} -- the root script forbids
+// cross-project configuration precisely because it breaks project isolation.
+group = "net.sarazan.articulate"
+version = "0.1.0"
 
 kotlin {
     // Pins the compile JDK independently of whatever JDK launches Gradle —
@@ -64,18 +73,25 @@ dependencies {
 }
 
 gradlePlugin {
+    // Portal metadata (D11: Plugin Portal first). `website`/`vcsUrl` are
+    // required by com.gradle.plugin-publish; publishing fails without them.
+    website.set("https://github.com/asarazan/articulate")
+    vcsUrl.set("https://github.com/asarazan/articulate")
+
     plugins {
         create("articulate") {
             id = "net.sarazan.articulate"
             implementationClass = "net.sarazan.articulate.gradle.ArticulatePlugin"
             displayName = "Articulate"
             description = "Generates an Xcode String Catalog from Android strings.xml, and verifies it hasn't drifted."
+            tags.set(listOf("android", "ios", "kotlin-multiplatform", "localization", "i18n", "xcstrings"))
         }
         create("articulateAndroid") {
             id = "net.sarazan.articulate.android"
             implementationClass = "net.sarazan.articulate.gradle.ArticulateAndroidPlugin"
             displayName = "Articulate (Android variant wiring)"
             description = "Wires Articulate's generated Android resources into AGP variant sources."
+            tags.set(listOf("android", "localization", "i18n", "agp"))
         }
     }
     // Explicit rather than relying on java-gradle-plugin's default source-set
