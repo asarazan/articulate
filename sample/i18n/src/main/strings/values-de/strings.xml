@@ -1,5 +1,6 @@
 <resources>
     <string name="hello">Hallo</string>
+    <string name="error_email_empty">Bitte gib eine E-Mail-Adresse ein.</string>
     <string name="error_email_invalid">Diese E-Mail-Adresse scheint nicht richtig zu sein.</string>
     <plurals name="unread_messages">
         <item quantity="one">%1$d ungelesene Nachricht</item>

@@ -850,7 +850,7 @@ The classloader defect was the more urgent of the two and was found only by the 
 
 ### Still-open decisions
 
-**All decisions are now ruled.** D8 (docs only, flagged to revisit — §8) and D11 (**Gradle Plugin Portal first**, decided 2026-07-31: canonical discovery for `id("net.sarazan.articulate")` with no repository declaration needed by consumers; Maven Central can follow without disrupting anyone) — D11 still gates the Portal name-collision check on the hub pre-flight list. The `commonMain` keys object is not a decision but a blocked one, waiting on §14.
+**All decisions are now ruled.** D8 (docs only, flagged to revisit — §8) and D11 (**Gradle Plugin Portal first**, decided 2026-07-31: canonical discovery for `id("net.sarazan.articulate")` with no repository declaration needed by consumers; Maven Central can follow without disrupting anyone) — D11 still gates the Portal name-collision check on the hub pre-flight list. The `commonMain` keys object was the last blocked one and is now **RULED — see §14** (2026-08-01: recommend a sealed type, generate nothing).
 
 ### Pending human input
 
@@ -860,6 +860,22 @@ The classloader defect was the more urgent of the two and was found only by the 
 ---
 
 ## 14. Sample project — the decision surface for the keys object
+
+### RULING (2026-08-01): no keys object. Recommend a sealed type; generate nothing.
+
+**Articulate generates exactly two things and neither is Kotlin:** the disposable Android `values-*/strings.xml` tree, and the committed `.xcstrings`. Shared code that needs to name a string returns a **consumer-authored sealed type** describing a domain outcome; each platform maps that outcome to its own localized string at its own edge.
+
+**What the sample revealed.** §14 was written to make the keys question concrete, and it did — but the answer it produced was not the one the section anticipated. The awkwardness at point 5 below is not a gap in Articulate. It is created by a *domain* function returning a *copy key*. `EmailValidator.errorKeyFor(email): String?` couples business logic to the copy layer, and the `Int`-vs-key mismatch is downstream of that coupling. Returning `EmailError?` removes the fork rather than bridging it: Android resolves each case through ordinary `R.string` constants (statically visible to R8, no reflection), iOS switches identically, and the compiler enforces exhaustiveness on both. **Verified 2026-08-01 by control and mutation**: adding a third `EmailError` case fails `:androidApp:compileDebugKotlin` with *"'when' expression must be exhaustive"*, and the unmutated code compiles clean.
+
+**Why not generate the sealed type.** Which keys form one domain concept is not knowable from `strings.xml` — a flat namespace that never says `error_email_empty` and `error_email_invalid` are two cases of one thing while `hello` is unrelated. Inferring clusters from key prefixes is a heuristic that is **wrong silently**, which is the failure class this project refuses everywhere else. It would also mean a localization tool emitting domain types, i.e. the consumer's business logic, permanently supported as our API surface.
+
+**Why the typo-safety argument does not resurrect it.** That case is already served by verification rather than generation: `verifyStrings` (§5) catches drift between source and catalog, and the M6 Swift parity lint catches key mismatch across platforms. Neither adds API surface.
+
+**What this rules *out*, honestly.** Shared-presentation KMP — a `commonMain` ViewModel choosing copy — is a real architecture, and for it a generated key→`R.string` map would remove genuine boilerplate. That case is deferred, not denied. It stays clean to add later because generation is purely additive, and notably it is the *mechanical* half (keys we own) without the *inferential* half (domain clusters we would be guessing at). Revisit if a real consumer hits it, or if copy must be selected dynamically (server-driven or A/B'd), where a compile-time sealed type genuinely cannot apply.
+
+**Consequence for this section.** §14's stated purpose is discharged. The sample keeps `:shared`, but its job changes from *"exhibit the keys problem"* to *"exhibit the recommended pattern"* — which is the better sample regardless. Everything below is retained as the record of what the sample had to contain for this ruling to be possible.
+
+---
 
 Requested 2026-07-31: the `commonMain` keys object cannot be ruled on sensibly without something to hold. This section specs what that sample has to contain to make the question *concrete*, as opposed to merely existing.
 

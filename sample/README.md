@@ -12,10 +12,13 @@ The brief's pitch #5 is **"doesn't require KMP."** This sample includes a
 `:shared` Kotlin Multiplatform module, and if that's all you look at, it's
 easy to walk away thinking Articulate needs KMP to work. **It does not.**
 
-`:shared` exists here for one reason only: to make PLAN.md §14's still-open
-"`commonMain` keys object" question concrete for a human to look at, by
-showing what shared code actually wanting to name a string looks like, and
-where the Android edge has to turn that string's key into an `R.string` int.
+`:shared` exists here for one reason only: to show the pattern Articulate
+**recommends** for shared code that needs to name a string — PLAN.md §14,
+ruled 2026-08-01. `EmailValidator.validate` returns a sealed `EmailError`,
+never a copy key, and each platform maps that outcome to its own localized
+string at its own edge. Articulate generates no Kotlin for this and no
+`commonMain` keys object; see §14 for why inferring domain types from a flat
+key namespace would be a heuristic that fails silently.
 Nothing about `net.sarazan.articulate` or `net.sarazan.articulate.android`
 depends on `:shared` existing, on Kotlin Multiplatform being applied
 anywhere, or on any KMP API. Delete `:shared` and its dependency line in
@@ -23,8 +26,8 @@ anywhere, or on any KMP API. Delete `:shared` and its dependency line in
 `:i18n` → `ios/App/Shared.xcstrings` keep working exactly as they do today.
 A plain Android app plus `:i18n`, with no KMP module at all, is the more
 common — and cheaper to run in CI — shape; this sample is the more elaborate
-one specifically because the elaborate one is what makes the keys question
-tangible.
+one specifically because the elaborate one is what makes the recommended
+pattern — and the reason it beats a generated keys object — legible.
 
 ## Layout
 
@@ -40,8 +43,10 @@ sample/
     └── Greeting.swift     # stub — no SwiftUI app needed to show the point (PLAN.md §14)
 ```
 
-`:i18n` authors two strings and a plural (`hello`, `error_email_invalid`,
-`unread_messages`), across `en` and `de`. `Shared.xcstrings` was generated
+`:i18n` authors three strings and a plural (`hello`, `error_email_empty`,
+`error_email_invalid`, `unread_messages`), across `en` and `de`. Two error
+strings rather than one is deliberate: it makes `EmailError`'s exhaustiveness
+observable, which a single case could not. `Shared.xcstrings` was generated
 from that source tree by the real `generateXcstrings` task, not hand-written
 — regenerate it any time with `./gradlew :i18n:generateXcstrings` and commit
 the result.
