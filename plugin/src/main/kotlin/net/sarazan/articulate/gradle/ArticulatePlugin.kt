@@ -59,19 +59,41 @@ class ArticulatePlugin : Plugin<Project> {
 
         val generateAndroidRes = project.tasks.register("generateAndroidRes", GenerateAndroidResTask::class.java) { task ->
             task.group = ARTICULATE_TASK_GROUP
-            // §4.4 (CORRECTED): "any user-facing documentation of 'where do the
-            // generated Android resources go' must name the app module's build
-            // dir, not :i18n's" -- so this user-visible `gradlew tasks` line has
-            // to name both cases, since the convention below only survives when
-            // net.sarazan.articulate.android is NOT wiring the output.
-            task.description = "Regenerates the disposable per-locale Android values*/strings.xml tree. " +
-                "Output goes to the app module's build/generated/res/generateAndroidRes when " +
-                "net.sarazan.articulate.android wires it, otherwise this module's build/generated/i18n/res."
+            // §4.4/§4.5 (CORRECTED 2026-08-01 for the cross-project redesign):
+            // this task's own output always lands at the convention below now
+            // -- net.sarazan.articulate.android no longer wires AGP directly
+            // onto this task's androidResDir; it consumes this module's
+            // generated tree via articulateAndroidResElements instead (see
+            // below) and materializes its OWN copy through a task it
+            // registers itself, which is what AGP actually relocates.
+            task.description = "Regenerates the disposable per-locale Android values*/strings.xml tree at " +
+                "build/generated/i18n/res. Consumed by net.sarazan.articulate.android (if applied elsewhere) " +
+                "via the articulateAndroidResElements configuration, not by wiring this task's output directly."
             task.stringsDir.set(extension.stringsDir)
             task.sourceLanguage.set(extension.sourceLanguage)
             task.localeOverrides.set(extension.localeOverrides)
             task.warningsAsErrors.set(extension.warningsAsErrors)
             task.androidResDir.set(project.layout.buildDirectory.dir("generated/i18n/res"))
+        }
+
+        // PLAN.md §4.5/§13 (release-blocking redesign): expose the generated
+        // Android res tree as a **consumable** configuration rather than
+        // requiring a consumer to reach into this project's task container.
+        // net.sarazan.articulate.android resolves this from the app module
+        // via an ordinary project dependency -- dependency-graph resolution,
+        // not project-container access, so it survives isolated projects and
+        // carries the task dependency on generateAndroidRes implicitly (via
+        // `builtBy` below), with no `dependsOn` needed anywhere. See
+        // ArticulateAndroidResSharing.kt for why this configuration and its
+        // attribute are safe to reference identically from both plugin
+        // classes despite usually running in different plugin classloaders.
+        val articulateAndroidResElements = project.configurations.consumable(
+            ARTICULATE_ANDROID_RES_ELEMENTS_CONFIGURATION,
+        ) { config ->
+            config.attributes.attribute(ARTICULATE_ANDROID_RES_ATTRIBUTE, ARTICULATE_ANDROID_RES_ATTRIBUTE_VALUE)
+        }
+        project.artifacts.add(articulateAndroidResElements.name, generateAndroidRes.flatMap { it.androidResDir }) { artifact ->
+            artifact.builtBy(generateAndroidRes)
         }
 
         val generateXcstrings = project.tasks.register("generateXcstrings", GenerateXcstringsTask::class.java) { task ->

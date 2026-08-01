@@ -449,7 +449,7 @@ Applied in the **app** module (settled). This also sidesteps the brief's AGP-9 c
 
 Never write into `src/*/res`; never use the legacy `sourceSets["main"].res.srcDir` (both settled).
 
-#### REDESIGN REQUIRED — the cross-project task lookup is release-blocking
+#### REDESIGN — **DONE 2026-08-01.** (Was release-blocking; kept as the record of why.)
 
 The wiring above resolves the producing task by reaching into another project's task container:
 
@@ -475,7 +475,17 @@ These are requirements, not a design. Any mechanism satisfying them is acceptabl
 - **Both AGP cells keep working** — 8.5.2 relocates the generated directory into `:app`'s build tree, 9.1 reads it in place (§4.4). Whatever replaces this must be indifferent to that difference.
 - **Applying both plugins to one module must not deadlock or produce a raw Gradle error** (today: `CircularReferenceException` naming nothing about Articulate).
 
-##### Mechanism — **VERIFIED by prototype 2026-08-01**
+##### Mechanism — **IMPLEMENTED and verified 2026-08-01**
+
+Shipped as `ArticulateAndroidResSharing` + `ResolveArticulateAndroidResTask`. `:i18n` exposes a consumable configuration (`articulateAndroidResElements`, attribute `net.sarazan.articulate.android-res`) carrying `generateAndroidRes`'s output; `:app` declares a matching resolvable configuration plus an ordinary project dependency, and registers **its own** task — created by its own plugin instance, so no class crosses a classloader boundary — which is what `addGeneratedSourceDirectory` wires.
+
+Verified by two independent reproductions: the checked-in `sample/` composite build (the agent's), and the original published-artifact fixture (mine). The latter now runs `:app:assembleDebug` green with a class referencing `R.string.hello`, so the generated string genuinely reaches AGP's resource merge, and `:app:help` succeeds under isolated projects.
+
+**Two side effects worth knowing.** Applying both plugin IDs to one module now *works*, rather than failing with a raw `CircularReferenceException`. And §4.4's AGP-version-dependent output location no longer affects us: since the wired task now lives in `:app` regardless, both cells converge on `app/build/generated/res/resolveArticulateAndroidRes/`. The AGP behavioral difference is real and still documented, but it is no longer ours to accommodate.
+
+**One implementation trap, recorded because it was nearly invisible.** Passing the `Configuration` object itself into the consuming task's input (`resolvedRes.from(configuration)`) is what carries implicit task ordering. An earlier attempt extracted `.files` inside a try/catch to produce a friendlier error message, which **silently broke ordering** for the same-module case — caught only by the self-application test. Gradle's native resolution diagnostics ship instead; they do name the project path.
+
+##### Prototype that preceded it
 
 `:i18n` exposes the generated tree as a **consumable configuration** carrying an attribute (e.g. `articulate-android-res`), with the generation task's output directory as its outgoing artifact. `:app` declares a **resolvable** configuration with matching attributes and a dependency on the i18n project, then resolves it. That is dependency resolution rather than project-container access — permitted under isolated projects, and it carries task dependencies implicitly.
 
@@ -801,47 +811,11 @@ The launcher is unavoidably environmental — `gradlew` is a shell script that n
 
 D7 sets v0 = milestones 1–5. **All five are now implemented and audited** (236 tests: 203 in `:core`, one of them the parked `RoundTripTest`, plus 33 in `:plugin` — counted 2026-08-01 from the JUnit XML, not from memory). This section tracks what stands between here and publishing, so none of it is rediscovered later. Nothing below blocks development; everything below blocks a release.
 
-### Ruled: defer, but fix before publishing
+### ~~Ruled: defer, but fix before publishing~~ — CLOSED 2026-08-01
 
-**Isolated projects incompatibility.** *Decided 2026-07-31: defer, track, revisit before v0 publishes.*
+**Both the isolated-projects incompatibility and the classloader defect are fixed**, by the single change described in §4.5. They shared one root cause: reaching into another project's task container.
 
-`net.sarazan.articulate.android` fails hard under `org.gradle.unsafe.isolated-projects=true`:
-
-```
-Cannot access project ':i18n' from project ':app'
-```
-
-Not a warning — a build failure, reproduced on both `:app:help` and a real compile at Gradle 8.7 / AGP 8.5.2. All three cross-project reaches are implicated (`evaluationDependsOn`, `project.project(path)`, `tasks.named(...)`); removing one does not help. Gradle attributes it to `com.android.internal.application`, because the calls run inside AGP's `onVariants` callback — so a user hitting this would have no reason to suspect Articulate.
-
-*Why defer:* costs nothing today. Isolated projects is opt-in and incubating; the configuration cache — the specified requirement — genuinely reuses across all four tasks, verified independently. *Why not indefinitely:* if a consumer adopts isolated projects our plugin blocks them, with an error naming someone else. If Gradle defaults it on, that becomes everyone.
-
-*The fix, when taken:* `:i18n` exposes the generated tree as a **consumable configuration** (e.g. `artifactType = "android-res-dir"`, `outgoing.artifact(generateAndroidRes.flatMap { it.androidResDir })`); `:app` consumes it as a dependency rather than reaching into another project's task container. That is dependency resolution rather than project-container access, which isolated projects permits, and it carries task dependencies implicitly so `evaluationDependsOn` disappears. Cost: `addGeneratedSourceDirectory` wants a `TaskProvider`, so `:app` likely needs a small per-variant task consuming the artifact.
-
-*Cheapest next step, now done (2026-08-01):* **AGP is not the blocker — we are.** A two-module Android project (app depending on lib, AGP 9.1, no Articulate) configures successfully with `org.gradle.unsafe.isolated-projects=true`. So the redesign cannot be deferred to "when AGP catches up"; it is genuinely ours to do before v0 publishes. *Caveat: the probe ran `:app:help`, which exercises configuration — where isolated projects applies and where our failure occurs — but a full `assembleDebug` would be a stronger check.*
-
-### Found by the publishing audit (2026-08-01) — not ruled, needs a human
-
-**Release-blocking: the two plugin IDs break when a consumer applies them from separate module `plugins {}` blocks with versions.** Reproduced against the *published* artifact (`publishToMavenLocal`, consumed from a genuinely separate build via `pluginManagement { repositories { mavenLocal() } }`, Gradle 8.7 / AGP 8.5.2):
-
-```
-> org.gradle.api.InvalidUserDataException: The task 'generateAndroidRes'
-  (net.sarazan.articulate.gradle.tasks.GenerateAndroidResTask) is not a subclass
-  of the given type (net.sarazan.articulate.gradle.tasks.GenerateAndroidResTask).
-```
-
-The same type name twice, because they are two `Class` objects from two classloaders. Gradle keys a plugin classloader on the *set* of jars a build script requests, so `:i18n` requesting `net.sarazan.articulate` and `:app` requesting `net.sarazan.articulate.android` **plus AGP** get separate copies of our classes — and `ArticulateAndroidPlugin`'s `i18nProject.tasks.named("generateAndroidRes", GenerateAndroidResTask::class.java)` compares identity across that boundary. Verified by elimination: make both modules' plugin-DSL classpaths identical (AGP applied some other way) and it works; declare all plugin IDs in the **root** build script with `apply false` and it works (a real `assembleDebug` produced an APK whose `R.string.hello` resolved). Both are workarounds, not fixes.
-
-*Why no test caught it:* every functional test uses `GradleRunner.withPluginClasspath()`, which injects one classpath for the whole fixture build — a single classloader, so cross-project class identity always held. The failing shape is unreachable through TestKit's default injection.
-
-*Options, for a human:* (a) stop crossing the boundary with type identity — look the task up untyped and reach `androidResDir` reflectively, which makes the natural layout work; (b) keep the typed lookup but catch the mismatch and re-throw naming the cause and the one-line fix, which satisfies §4.1 lesson 6 but leaves the natural layout unsupported; (c) the §13 isolated-projects redesign above (consumable configuration) removes the cross-project task lookup entirely and would close this too — the two problems have one fix. **(c) is the same work already ruled "fix before publishing", so this finding raises its priority rather than adding a separate one.** The auditor deliberately did not implement any of them (`AGENTS.md`: the auditor must never be the implementer).
-
-**Silent loss: `<item type="string">` and `<array>` are dropped without a diagnostic.** `aapt2` (oracle, 2026-08-01) compiles
-
-```xml
-<item type="string" name="item_string">Item string</item>
-```
-
-into `string/item_string`, indistinguishable from a `<string>` — and an `<array>` of string items into a string array. Both are invisible to us: `AndroidStringsParser`'s top-level `when` sends unknown elements to `skipElement`, and `ValuesFileClassifier.CONTENT_ELEMENTS` is exactly `{string, plurals, string-array}`. So a `strings.xml` using the general `<item type=…>` form loses strings silently, and D6's loud `<string-array>` rejection is bypassed by spelling it `<array>`. §4.3's literal table is implemented correctly; the table's *enumeration* is what is incomplete. Note any fix must key on the `type` attribute — bare `<item type="id" …>` is common and genuinely presentation.
+The classloader defect was the more urgent of the two and was found only by the publishing audit — consuming the *published* artifact with per-module `plugins {}` blocks, which is Android Studio's default shape. It was invisible to 236 passing tests because `withPluginClasspath()` injects one classpath for the whole fixture, so cross-project class identity always held. The regression test now consumes via a composite build, which produces genuinely distinct classloaders; it was confirmed red against the old implementation before the fix landed.
 
 ### Correctness items from the M4/M5 audit
 

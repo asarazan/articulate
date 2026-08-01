@@ -1,5 +1,6 @@
 package net.sarazan.articulate.gradle
 
+import net.sarazan.articulate.gradle.FunctionalTestSupport.COMPILE_SDK
 import net.sarazan.articulate.gradle.FunctionalTestSupport.GRADLE_FLOOR_VERSION
 import net.sarazan.articulate.gradle.FunctionalTestSupport.requireOrSkipAndroidSdk
 import net.sarazan.articulate.gradle.FunctionalTestSupport.writeAndroidAppModule
@@ -60,11 +61,12 @@ import java.nio.file.Path
  *    R-class generation actually picked up the wired directory (a stronger
  *    proof than asserting a task merely ran), plus a direct scan of the
  *    merged-resources output under `app/build` for the string.
- *  - [ArticulateAndroidExtension.i18nProject]'s cross-project task lookup
- *    resolves `generateAndroidRes` from a real sibling `:i18n` module in a
- *    real multi-module build, and its two `GradleException` paths (missing
- *    project; project that hasn't applied `net.sarazan.articulate`) fire
- *    with the messages [ArticulateAndroidPlugin] declares.
+ *  - [ArticulateAndroidExtension.i18nProject]'s dependency-based resolution
+ *    (PLAN.md §4.5/§13 -- not a cross-project task lookup any more) resolves
+ *    `:i18n`'s generated res from a real sibling module in a real
+ *    multi-module build, and its two failure paths (missing project; project
+ *    that hasn't applied `net.sarazan.articulate`) fail loudly with Gradle's
+ *    own resolution diagnostics, which name the project path.
  *  - Nothing ever writes into a checked-in `res` source set -- `app/src/main/res`
  *    never exists, and the strings source tree is untouched after the build.
  */
@@ -94,17 +96,17 @@ class AndroidWiringFunctionalTest {
      *
      * **`include` order is not evaluation order.** Gradle evaluates sibling
      * projects in alphabetical path order, so `:app` is configured *before*
-     * `:i18n` here no matter which the settings file lists first -- meaning
-     * every fixture in this class exercises exactly the ordering hazard
-     * [ArticulateAndroidPlugin]'s `project.evaluationDependsOn(i18nProjectPath)`
-     * exists to defuse: `:i18n` has not yet registered `generateAndroidRes`
-     * when AGP fires `:app`'s `onVariants` callbacks.
-     *
-     * Mutation-verified 2026-07-31: deleting that one call fails four tests in
-     * this class, each with the plugin's own (in that state, false)
-     * `project ':i18n' has no 'generateAndroidRes' task -- apply
-     * net.sarazan.articulate to it first`. The line is load-bearing and is
-     * covered; do not "simplify" it away.
+     * `:i18n` here no matter which the settings file lists first. Before the
+     * §4.5/§13 redesign, this ordering was a real hazard the plugin had to
+     * defuse explicitly (`project.evaluationDependsOn(i18nProjectPath)`),
+     * because the old cross-project task lookup ran eagerly, inside
+     * `onVariants`. It is no longer a hazard at all: the dependency-based
+     * mechanism resolves lazily, at whatever point `articulateAndroidResIn`'s
+     * files are actually needed -- by then, every project's tasks are
+     * registered regardless of evaluation order, so no explicit ordering
+     * call is needed any more. This fixture's `:app`-before-`:i18n` order is
+     * kept anyway, as a standing check that the redesign really doesn't
+     * care.
      */
     private fun writeTwoModuleFixture(): File {
         writeAndroidSettings(projectDir)
@@ -154,71 +156,175 @@ class AndroidWiringFunctionalTest {
         // means AGP *owns* the output location: it sets the wired DirectoryProperty
         // itself, overriding whatever convention the task declared. The output
         // therefore lands in the CONSUMING app project's build dir, in a folder
-        // named after the task -- not under the :i18n module at all.
+        // named after the WIRED task -- not named after generateAndroidRes: the
+        // task AGP wires is now net.sarazan.articulate.android's own
+        // ResolveArticulateAndroidResTask ("resolveArticulateAndroidRes"),
+        // registered in the app module, not the i18n-owning task directly.
         //
         // Verified empirically 2026-07-30 (Google's own "extend AGP" page states
         // the opposite; observation wins). This corrects PLAN.md §4.4, which
         // described the output as living at i18n/build/generated/i18n/res.
-        val generated = File(projectDir.toFile(), "app/build/generated/res/generateAndroidRes/values/strings.xml")
+        val generated = File(projectDir.toFile(), "app/build/generated/res/resolveArticulateAndroidRes/values/strings.xml")
         assertTrue(
             generated.isFile,
-            "expected AGP-relocated generated res at app/build/generated/res/generateAndroidRes/values/strings.xml",
+            "expected AGP-relocated generated res at app/build/generated/res/resolveArticulateAndroidRes/values/strings.xml",
         )
-        val localeGenerated = File(projectDir.toFile(), "app/build/generated/res/generateAndroidRes/values-de/strings.xml")
+        val localeGenerated = File(projectDir.toFile(), "app/build/generated/res/resolveArticulateAndroidRes/values-de/strings.xml")
         assertTrue(localeGenerated.isFile, "per-locale generated res must be relocated alongside the default")
 
-        // And nothing was written under the :i18n module's own build dir, which
-        // is what the pre-correction expectation assumed.
-        val staleExpectation = File(i18nDir, "build/generated/i18n/res")
-        assertFalse(
-            staleExpectation.exists(),
-            "AGP owns the wired output location, so nothing should land under :i18n's build dir",
+        // Genuinely different from the pre-redesign invariant (§4.5/§13):
+        // :i18n's own generateAndroidRes task now ALWAYS materializes at its
+        // own convention location too, because nothing overrides its
+        // androidResDir property any more -- only the *consumer's*
+        // resolveArticulateAndroidRes gets AGP-relocated. :i18n's copy is the
+        // artifact the consumable configuration publishes; :app's is a
+        // materialized copy of what got resolved from it. Both exist
+        // simultaneously now, which is expected, not stale.
+        val i18nOwnCopy = File(i18nDir, "build/generated/i18n/res/values/strings.xml")
+        assertTrue(
+            i18nOwnCopy.isFile,
+            "expected :i18n's own generateAndroidRes to still materialize at its own convention location, " +
+                "since it is no longer the task AGP wires directly: $i18nOwnCopy",
         )
     }
 
     @Test
-    fun `i18nProject cross-project task lookup resolves generateAndroidRes from a sibling module`() {
-        writeTwoModuleFixture()
+    fun `articulateAndroidResIncoming resolves the sibling i18n module's generated res via dependency resolution, not a task lookup`() {
+        val i18nDir = writeTwoModuleFixture()
 
-        // A task that doesn't even touch generateAndroidRes still forces
-        // full project configuration (no configuration-on-demand here), which
-        // is where ArticulateAndroidPlugin's androidComponents.onVariants
-        // callback performs the cross-project lookup -- so a successful
-        // configuration of :app already proves the lookup found :i18n's
-        // real, registered generateAndroidRes task, not a stub.
-        val result = androidRunner(":app:help").build()
+        // Unlike the pre-redesign implementation, plain configuration (e.g.
+        // `:app:help`) no longer touches the cross-project dependency at all
+        // -- resolution is now genuinely lazy, deferred to whenever
+        // resolveArticulateAndroidRes's inputs are actually needed (PLAN.md
+        // §4.5/§13). Requesting that task directly is therefore the
+        // narrowest real proof the dependency-based mechanism resolves
+        // :i18n's generated res correctly, with no `dependsOn` declared
+        // anywhere in ArticulateAndroidPlugin -- the ordering is carried
+        // implicitly by the configuration's artifact `builtBy`.
+        val result = androidRunner(":app:resolveArticulateAndroidRes").build()
 
-        assertEquals(TaskOutcome.SUCCESS, result.task(":app:help")!!.outcome)
+        assertEquals(TaskOutcome.SUCCESS, result.task(":app:resolveArticulateAndroidRes")!!.outcome)
+        assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:generateAndroidRes")!!.outcome)
+
+        // AGP relocates resolveArticulateAndroidRes's output as soon as it
+        // creates variants during project configuration (§4.4/§4.5), which
+        // happens regardless of which task was actually requested -- so even
+        // this narrow, non-compile invocation already sees the relocated
+        // path, not resolveArticulateAndroidRes's own build/generated/articulate/res
+        // convention.
+        val resolved = File(projectDir.toFile(), "app/build/generated/res/resolveArticulateAndroidRes/values/strings.xml")
+        assertTrue(
+            resolved.isFile && resolved.readText().contains("<string name=\"hello\">Hello</string>"),
+            "expected resolveArticulateAndroidRes to have materialized :i18n's generated res, sourced via " +
+                "dependency resolution rather than a cross-project task lookup: $resolved",
+        )
+        // Sanity: the source module used for this resolution really is :i18n.
+        assertTrue(i18nDir.name == "i18n")
     }
 
     @Test
-    fun `i18nProject pointing at a nonexistent project fails with a clear GradleException`() {
+    fun `i18nProject pointing at a nonexistent project fails with a clear resolution error naming that project`() {
         writeAndroidSettings(projectDir, modules = listOf("app"))
         writeAndroidAppModule(projectDir, i18nProjectPath = ":does-not-exist", withMarker = false)
 
-        val result = androidRunner(":app:help").buildAndFail()
+        // Resolution is lazy (§4.5/§13's redesign) -- unlike the old
+        // cross-project task lookup, plain configuration (`:app:help`) no
+        // longer touches it. Requesting the task that actually needs the
+        // resolved res is what surfaces the failure now. The message is
+        // Gradle's own dependency-resolution diagnostic, not a custom
+        // Articulate-authored one (§4.5's requirements are about *how* the
+        // lookup happens -- no cross-project task-container access, no
+        // cross-classloader class identity -- not about who authors the
+        // failure text), and it already names the exact project path.
+        val result = androidRunner(":app:resolveArticulateAndroidRes").buildAndFail()
 
         assertTrue(
-            result.output.contains("articulateAndroid.i18nProject is set to ':does-not-exist'") &&
-                result.output.contains("but no such project exists"),
-            "expected a clear GradleException naming the missing project:\n${result.output}",
+            result.output.contains("Could not determine the dependencies of task ':app:resolveArticulateAndroidRes'") &&
+                result.output.contains("Project with path ':does-not-exist' could not be found"),
+            "expected a clear resolution error naming the missing project:\n${result.output}",
         )
     }
 
     @Test
-    fun `i18nProject pointing at a project that has not applied net sarazan articulate fails with a clear GradleException`() {
+    fun `i18nProject pointing at a project that has not applied net sarazan articulate fails with a clear resolution error`() {
         writeAndroidSettings(projectDir)
         val i18nDir = File(projectDir.toFile(), "i18n").apply { mkdirs() }
-        // Deliberately does not apply net.sarazan.articulate -- no generateAndroidRes task will exist.
+        // Deliberately does not apply net.sarazan.articulate -- no
+        // articulateAndroidResElements consumable configuration will exist.
         File(i18nDir, "build.gradle").writeText("")
         writeAndroidAppModule(projectDir, withMarker = false)
 
-        val result = androidRunner(":app:help").buildAndFail()
+        val result = androidRunner(":app:resolveArticulateAndroidRes").buildAndFail()
 
         assertTrue(
-            result.output.contains("project ':i18n' has no 'generateAndroidRes' task"),
-            "expected a clear GradleException naming the missing task:\n${result.output}",
+            result.output.contains("Could not resolve project :i18n") &&
+                result.output.contains("No matching variant of project :i18n was found") &&
+                result.output.contains("net.sarazan.articulate.android-res"),
+            "expected a clear resolution error naming the misconfigured project and the missing attribute:\n${result.output}",
         )
+    }
+
+    @Test
+    fun `applying both plugin IDs to a single module resolves its own generated res without a raw CircularReferenceException`() {
+        // PLAN.md §4.5's explicit requirement: applying both plugins to one
+        // module must not deadlock or produce a raw Gradle error naming
+        // nothing about Articulate (the pre-redesign implementation threw
+        // org.gradle.api.CircularReferenceException here, via
+        // project.evaluationDependsOn(project.path) -- a call this
+        // implementation no longer makes at all). articulateAndroid.i18nProject
+        // is pointed at the module's own path, matching a single-module app
+        // that also owns its own strings.
+        writeAndroidSettings(projectDir, modules = listOf("app"))
+        val appDir = File(projectDir.toFile(), "app").apply { mkdirs() }
+        File(appDir, "build.gradle").writeText(
+            """
+            plugins {
+                id 'net.sarazan.articulate'
+                id 'net.sarazan.articulate.android'
+            }
+
+            apply plugin: 'com.android.application'
+
+            android {
+                namespace 'net.sarazan.articulate.fixture.selfapp'
+                compileSdk $COMPILE_SDK
+
+                defaultConfig {
+                    applicationId 'net.sarazan.articulate.fixture.selfapp'
+                    minSdk 24
+                    targetSdk $COMPILE_SDK
+                }
+            }
+
+            articulate {
+                sourceLanguage = 'en'
+                ios {
+                    catalog = file('ios/Shared.xcstrings')
+                }
+            }
+
+            articulateAndroid {
+                i18nProject = ':app'
+            }
+            """.trimIndent(),
+        )
+        writeValidStringsFixture(appDir.toPath())
+        val mainDir = File(appDir, "src/main").apply { mkdirs() }
+        File(mainDir, "AndroidManifest.xml").writeText(
+            """
+            <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+                <application />
+            </manifest>
+            """.trimIndent(),
+        )
+
+        val result = androidRunner(":app:resolveArticulateAndroidRes").build()
+
+        assertEquals(TaskOutcome.SUCCESS, result.task(":app:resolveArticulateAndroidRes")!!.outcome)
+        assertEquals(TaskOutcome.SUCCESS, result.task(":app:generateAndroidRes")!!.outcome)
+        assertFalse(result.output.contains("CircularReferenceException"))
+        val resolved = File(appDir, "build/generated/res/resolveArticulateAndroidRes/values/strings.xml")
+        assertTrue(resolved.isFile, "expected the self-applied module's own generated res to resolve: $resolved")
     }
 
     @Test

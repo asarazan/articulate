@@ -19,7 +19,13 @@ dependencyResolutionManagement {
 
 rootProject.name = "articulate"
 
-// `sample` lands separately (D1: multi-module) — it needs an Android SDK this
-// machine doesn't have, and is explicitly out of scope for milestone 4/5.
+// `sample/` (PLAN.md §14/§4.5) is deliberately NOT included here -- it is
+// its own composite build (`sample/settings.gradle.kts` does
+// `pluginManagement { includeBuild("..") }` against this root), which is
+// exactly what gives its modules genuinely distinct plugin classloaders
+// (needed to reproduce the §4.5/§13 cross-project bug at all -- see
+// SampleCompositeBuildFunctionalTest). Including it as an ordinary
+// subproject here would collapse it back onto this build's single
+// classloader and defeat that purpose.
 include("core")
 include("plugin")

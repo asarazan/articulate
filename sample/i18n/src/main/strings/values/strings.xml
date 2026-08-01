@@ -1,0 +1,8 @@
+<resources>
+    <string name="hello">Hello</string>
+    <string name="error_email_invalid">That email address doesn\'t look right.</string>
+    <plurals name="unread_messages">
+        <item quantity="one">%1$d unread message</item>
+        <item quantity="other">%1$d unread messages</item>
+    </plurals>
+</resources>

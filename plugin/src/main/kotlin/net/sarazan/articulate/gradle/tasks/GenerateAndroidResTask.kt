@@ -20,15 +20,18 @@ import java.io.File
  * tree from the strings source tree. Disposable -- never committed, under a
  * build directory (the "narrow output declaration" lesson from ListenUp, §4.1).
  *
- * **Where the output lands is not this task's decision** whenever
- * [net.sarazan.articulate.gradle.ArticulateAndroidPlugin] is wiring it:
- * `addGeneratedSourceDirectory(task, wiredWith)` makes AGP set [androidResDir]
- * itself, so the tree materializes under the *consuming app project's* build
- * dir (`app/build/generated/res/generateAndroidRes/`), not this module's.
- * §4.4, corrected 2026-07-30 against a real built fixture. The convention set
- * by `ArticulatePlugin` (`build/generated/i18n/res`) therefore applies only
- * when nothing wires the property -- do not reason about it when debugging a
- * variant-wired build.
+ * **[androidResDir] always lands at `ArticulatePlugin`'s convention
+ * (`build/generated/i18n/res`)** -- unlike before the §4.5/§13 cross-project
+ * redesign (2026-08-01), [net.sarazan.articulate.gradle.ArticulateAndroidPlugin]
+ * no longer wires AGP's `addGeneratedSourceDirectory` onto this task directly
+ * (that would compare this class's identity across a classloader boundary
+ * whenever the two plugin IDs are applied from separate module `plugins {}`
+ * blocks -- the release-blocking bug the redesign fixes). This module's
+ * generated tree is instead exposed as a consumable configuration
+ * (`articulateAndroidResElements`) and consumed by a task the app module's
+ * own plugin instance registers -- see `ArticulateAndroidResSharing.kt` and
+ * `ResolveArticulateAndroidResTask`. *That* task, not this one, is what AGP
+ * ends up relocating into the consuming app project's build dir.
  *
  * Runs the full [AndroidToXcstringsConverter.convert] pipeline (parse +
  * every cross-locale validation rule in `docs/CONVERSIONS.md`) purely as a

@@ -91,6 +91,7 @@ class AndroidWiringAgp91FunctionalTest {
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:compileDebugJavaWithJavac")!!.outcome)
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:compileReleaseJavaWithJavac")!!.outcome)
         assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:generateAndroidRes")!!.outcome)
+        assertEquals(TaskOutcome.SUCCESS, result.task(":app:resolveArticulateAndroidRes")!!.outcome)
         // Marker.java (written by writeAndroidAppModule) references
         // R.string.hello -- javac succeeding is proof AGP 9.1's resource
         // merge and R-class generation actually picked up the wired
@@ -99,44 +100,43 @@ class AndroidWiringAgp91FunctionalTest {
         val checkedInRes = File(projectDir.toFile(), "app/src/main/res")
         assertFalse(checkedInRes.exists(), "app/src/main/res must never exist under AGP 9.1 either")
 
-        // A genuine, empirically-discovered divergence from the floor cell
-        // (AGP 8.5.2): there, "AGP owns the wired output location" and
-        // relocates the generated res into the CONSUMING :app project's
-        // build dir (app/build/generated/res/generateAndroidRes/...; see
-        // AndroidWiringFunctionalTest). Under AGP 9.1 that relocation does
-        // NOT happen -- javac/R-class generation still resolves R.string.hello
-        // correctly (proven above), but the actual files stay exactly where
-        // GenerateAndroidResTask itself wrote them, under the PRODUCING
-        // :i18n project's own build dir. Verified 2026-07-31 by dumping the
-        // full app/build + i18n/build file trees after a real AGP 9.1 build:
-        // no app/build/generated/res directory exists at all under AGP 9.1,
-        // and i18n/build/generated/i18n/res/{values,values-de}/strings.xml
-        // do exist. This is a real cross-version behavior change in how AGP
-        // consumes Variant API-registered generated source directories, not
-        // a bug in this plugin -- the plugin only registers the directory;
-        // AGP alone decides whether to relocate or read it in place.
-        val inPlaceAtProducer = File(projectDir.toFile(), "i18n/build/generated/i18n/res/values/strings.xml")
+        // Before PLAN.md §4.5/§13's redesign, this cell genuinely diverged
+        // from the floor's: AGP 9.1 left GenerateAndroidResTask's output in
+        // place at the PRODUCING :i18n project's own build dir instead of
+        // relocating it into :app, unlike AGP 8.5.2. That divergence is gone
+        // now, not by accident: the task AGP wires via
+        // addGeneratedSourceDirectory is net.sarazan.articulate.android's own
+        // ResolveArticulateAndroidResTask, registered IN the app module --
+        // so "relocated into :app's build tree" and "left where the wired
+        // task wrote it" are the same location on both AGP cells. Verified
+        // 2026-08-01 against a real AGP 9.1 build (dumping the full
+        // app/build + i18n/build trees): both this file and the floor
+        // cell's equivalent assertion in AndroidWiringFunctionalTest now
+        // expect the identical relative path.
+        val relocated = File(projectDir.toFile(), "app/build/generated/res/resolveArticulateAndroidRes/values/strings.xml")
         assertTrue(
-            inPlaceAtProducer.isFile,
-            "expected the generated res to remain at :i18n's own build dir under AGP $AGP_91_VERSION " +
-                "(no relocation into :app's build dir, unlike the AGP 8.5.2 floor cell): $inPlaceAtProducer",
+            relocated.isFile,
+            "expected AGP $AGP_91_VERSION to relocate the generated res into :app's build dir exactly like the " +
+                "AGP 8.5.2 floor cell now does (PLAN.md §4.5/§13 redesign closed the prior divergence): $relocated",
         )
-        val relocatedLikeFloor = File(projectDir.toFile(), "app/build/generated/res/generateAndroidRes/values/strings.xml")
-        assertFalse(
-            relocatedLikeFloor.isFile,
-            "AGP $AGP_91_VERSION does not relocate the generated res into :app's build dir the way the " +
-                "AGP 8.5.2 floor cell does -- if this now exists, AGP's behavior has changed again and this " +
-                "assertion (and its sibling above) need re-verifying, not silently updating.",
-        )
+
+        // :i18n's own generateAndroidRes still materializes at its own
+        // convention location too -- it is the artifact the consumable
+        // configuration publishes, not the task AGP wires directly any
+        // more, so this is expected on both cells (see the identical
+        // assertion in AndroidWiringFunctionalTest).
+        val i18nOwnCopy = File(projectDir.toFile(), "i18n/build/generated/i18n/res/values/strings.xml")
+        assertTrue(i18nOwnCopy.isFile, "expected :i18n's own generateAndroidRes to still materialize at its own convention location: $i18nOwnCopy")
     }
 
     @Test
-    fun `AGP 9 1 -- i18nProject cross-project task lookup resolves generateAndroidRes from a sibling module`() {
+    fun `AGP 9 1 -- articulateAndroidResIncoming resolves generateAndroidRes's output from a sibling module`() {
         writeTwoModuleFixture()
 
-        val result = agp91Runner(":app:help").build()
+        val result = agp91Runner(":app:resolveArticulateAndroidRes").build()
 
-        assertEquals(TaskOutcome.SUCCESS, result.task(":app:help")!!.outcome)
+        assertEquals(TaskOutcome.SUCCESS, result.task(":app:resolveArticulateAndroidRes")!!.outcome)
+        assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:generateAndroidRes")!!.outcome)
     }
 
     @Test
