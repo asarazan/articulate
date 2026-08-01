@@ -1,0 +1,2 @@
+<item type="array">
+weekdays_0

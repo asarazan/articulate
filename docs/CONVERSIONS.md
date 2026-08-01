@@ -634,6 +634,47 @@ real conversion, not a pass-through, and the plan has no rule for it.
 
 ---
 
+### K8 — Declaration form is not the resource type — VERIFIED **[NEW — 2026-08-01]**
+
+Discovery matched on **element names**; Android resolves on **resource types**, and the two disagree
+in both directions. Every row below is a real `aapt2 compile` + `link` + `dump resources` run, not a
+reading of the docs — the docs describe none of it.
+
+| Written in `values/strings.xml` | Resource aapt2 actually produced | Our rule |
+|---|---|---|
+| `<string name="plain">` | `string/plain` `"Plain string"` | parse |
+| `<item type="string" name="via_item">` | `string/via_item` `"Declared with item…"` — **same type, indistinguishable** | **parse** (was silently skipped) |
+| `<string-array name="classic">` | `array/classic` `["one", "two"]` | hard error (D6) |
+| `<array name="generic">` | `array/generic` `["alpha", "beta"]` — **same `type array` block** | **hard error** (was silently skipped) |
+| `<item type="array" name="x">` | `array/x` `(styled string) " p q "` — malformed | **hard error** |
+| `<item type="plurals" name="x">` | `plurals/x` `(styled string) " %1$d thing %1$d things " item;quantity=one:1,10` — malformed | **hard error, message explains the malformation** |
+| `<plurals name="real">` *(control)* | `plurals/real` `(plurals) size=2` `one=…` `other=…` | parse |
+| `<item type="color\|bool\|dimen\|integer">` | `color/…`, `bool/…`, … | silently ignore |
+| `<item type="string-array">` | **rejected by aapt2**: `error: unknown resource type 'string-array'` | n/a — the form does not exist |
+
+`[EXP-aapt2]` for every row.
+
+**Two findings, not one.** The `<array>` spelling walked straight past a D6 rejection keyed on the
+literal element name `<string-array>` — same class of bug as the multi-file one, where discovery
+keyed on a filename while Android keys on directory contents. And `<item type="string">` was
+**ordinary translatable copy going missing entirely**, with `verifyStrings` green because the key
+never entered the model to be compared.
+
+**`<item type="plurals">` and `<item type="array">` are not alternative syntax.** They compile
+without error and produce a *styled string* occupying the `plurals`/`array` type slot — the nested
+children become markup spans, not variants. The control in the same compile proves the contrast:
+`<plurals>` yields `(plurals) size=2` with `one=`/`other=`, while `<item type="plurals">` yields
+`(styled string)` with `item;quantity=one:1,10` span offsets. Anyone writing this form already has
+a broken resource on Android, so the error names the malformation rather than merely refusing.
+
+**No `foo_1`/`foo_2` grouping convention exists on the Xcode side**, which is worth stating because
+it is a natural assumption. `xcstringstool` compiled `weekday_1`/`weekday_2`/`weekday_3` to three
+independent flat keys in the output plist, with no grouping, and the format has no array construct
+to group into — an array-shaped localization is rejected with `Missing required key 'stringUnit'
+inside 'strings' -> 'weekdays' -> 'localizations' -> 'en'` `[EXP-xcs]`. This is *why* D6 rejects
+rather than converts: there is no lossless target, and any "support" would mean inventing a key
+convention Xcode does not know about, with nothing checking that the reconstructed count matches.
+
 ## 8. Placeholders
 
 ### P0 — Positional discipline: **VERIFIED, and it is AAPT2's default** — plan confirmed
@@ -1040,6 +1081,16 @@ Cases named in `PLAN.md` §2.2/§2.3, with any semantic change noted:
 do not drop)* · `error-duplicate-key` · `error-orphan-key` · `error-bad-key` ·
 `error-nonpositional-multi` · `error-grouping-flag` · `placeholders-hex-octal` *(changed: emit
 `%llx`/`%llo`)* · `error-locale-arity-mismatch` · `error-locale-type-mismatch`
+
+Added 2026-08-01 by K8 (declaration form vs resource type), all five oracle-derived:
+
+**Declaration forms** `item-type-string` · `item-type-nonstring-ignored` ·
+`error-generic-array-element` · `error-item-declaring-array` · `error-item-declaring-quantities`
+
+Four of the five were confirmed red before the fix by making the new parser branches unreachable.
+`item-type-nonstring-ignored` deliberately passes both ways — it pins *pre-existing* skip behavior
+so a future over-eager rule cannot start erroring on `<item type="color">`; it was separately proven
+capable of failing by mutating that branch to throw.
 
 New cases this research requires (49):
 

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="declared_with_string">Declared with string</string>
+    <item type="string" name="declared_with_item">Declared with item</item>
+    <!-- a comment attaches to the item form too -->
+    <item type="string" name="commented_item">Has a comment</item>
+    <item type="string" name="untranslated_item" translatable="false">Leave me alone</item>
+</resources>

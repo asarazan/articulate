@@ -108,16 +108,54 @@ internal object AndroidStringsParser {
                             resources += resource
                         }
 
-                        "string-array" -> {
-                            val name = reader.getAttributeValue(null, "name") ?: "<unnamed>"
-                            throw ConversionException(
-                                position,
-                                name,
-                                "<string-array> is not supported -- iOS has no array resource, and " +
-                                    "auto-indexing would invent both a key convention and a type " +
-                                    "policy Articulate can't know is right. Split '$name' into plain " +
-                                    "<string> resources instead, e.g. '${name}_0', '${name}_1', ...",
-                            )
+                        "string-array" -> throw arrayNotSupported(reader, position, "<string-array>")
+
+                        // Android resolves `<array>` to the *same* resource type as
+                        // `<string-array>` -- verified with aapt2, which puts
+                        // `array/classic_array` and `array/generic_array` side by side
+                        // in one `type array` block. Rejecting only the `<string-array>`
+                        // spelling let this spelling through silently, which is data
+                        // loss wearing the same clothes as the multi-file bug: our
+                        // discovery keyed on an element name where Android keys on a
+                        // resource type.
+                        "array" -> throw arrayNotSupported(reader, position, "<array>")
+
+                        // `<item type="...">` is Android's generic declaration form and
+                        // is NOT interchangeable across types -- each branch below is
+                        // what aapt2 actually produced, not what the docs imply.
+                        "item" -> when (reader.getAttributeValue(null, "type")) {
+                            // Compiles to a `string` resource indistinguishable from
+                            // `<string>`. Previously skipped, so ordinary translatable
+                            // copy went missing with verifyStrings green -- it never
+                            // knew the key existed.
+                            "string" -> {
+                                val resource = parseStringElement(
+                                    reader, flattener, filePath, position, commentForThisElement, diagnostics,
+                                    elementName = "item",
+                                )
+                                checkDuplicate(seenNames, resource.name, position, filePath)
+                                resources += resource
+                            }
+
+                            "array" -> throw arrayNotSupported(reader, position, "<item type=\"array\">")
+
+                            "plurals" -> {
+                                val name = reader.getAttributeValue(null, "name") ?: "<unnamed>"
+                                throw ConversionException(
+                                    position,
+                                    name,
+                                    "<item type=\"plurals\"> does not declare a plurals resource. Android " +
+                                        "compiles it to a *styled string* -- the nested <item quantity=\"...\"> " +
+                                        "elements become markup spans, not quantity variants, so '$name' is " +
+                                        "already broken on Android itself and would be wrong on iOS too. " +
+                                        "Use <plurals name=\"$name\"> instead.",
+                                )
+                            }
+
+                            // Every other type (color, dimen, bool, integer, style...)
+                            // is a presentation resource and genuinely not ours --
+                            // same rule the multi-file check applies (§4.3).
+                            else -> skipElement(reader)
                         }
 
                         else -> skipElement(reader)
@@ -138,6 +176,28 @@ internal object AndroidStringsParser {
         return ParsedFile(filePath, resources, diagnostics)
     }
 
+    /**
+     * D6's rejection, shared by every spelling that reaches Android's `array`
+     * resource type. [spelling] names the one actually written so the message
+     * points at the user's own text rather than a canonical form they did not
+     * use.
+     */
+    private fun arrayNotSupported(
+        reader: XMLStreamReader,
+        position: XmlPosition,
+        spelling: String,
+    ): ConversionException {
+        val name = reader.getAttributeValue(null, "name") ?: "<unnamed>"
+        return ConversionException(
+            position,
+            name,
+            "$spelling is not supported -- iOS has no array resource, and " +
+                "auto-indexing would invent both a key convention and a type " +
+                "policy Articulate can't know is right. Split '$name' into plain " +
+                "<string> resources instead, e.g. '${name}_0', '${name}_1', ...",
+        )
+    }
+
     private fun parseStringElement(
         reader: XMLStreamReader,
         flattener: ContentFlattener,
@@ -145,6 +205,7 @@ internal object AndroidStringsParser {
         position: XmlPosition,
         pendingComment: String?,
         diagnostics: MutableList<Diagnostic>,
+        elementName: String = "string",
     ): ParsedResource.StringResource {
         val name = requireName(reader, position)
         checkKeyLegality(name, position)
@@ -152,7 +213,12 @@ internal object AndroidStringsParser {
         val translatable = parseBooleanAttr(reader, "translatable", position, name) ?: true
         val formatted = parseBooleanAttr(reader, "formatted", position, name) ?: true
 
-        val flattened = flattener.flatten(reader, "string", name)
+        // [elementName] is the tag the content closes with -- "string" normally,
+        // "item" for the `<item type="string">` spelling (§2.2). Everything else
+        // about the two is identical, which is not an assumption: aapt2 compiles
+        // both to the same `string` resource type, byte-indistinguishable in the
+        // resource table.
+        val flattened = flattener.flatten(reader, elementName, name)
         if (flattened.hasRealSpan) throw styledMarkupError(flattened, filePath, name)
         diagnostics += foreignNamespaceWarnings(flattened, name)
 

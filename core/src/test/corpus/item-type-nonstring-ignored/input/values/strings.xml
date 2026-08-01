@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="only_real_string">The only string here</string>
+    <item type="color" name="brand">#FF0000</item>
+    <item type="bool" name="feature_on">true</item>
+    <item type="dimen" name="gutter">8dp</item>
+    <item type="integer" name="max_retries">3</item>
+</resources>

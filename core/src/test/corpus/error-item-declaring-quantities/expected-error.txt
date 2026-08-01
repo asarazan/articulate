@@ -1,0 +1,3 @@
+styled string
+markup spans, not quantity variants
+<plurals name="unread">

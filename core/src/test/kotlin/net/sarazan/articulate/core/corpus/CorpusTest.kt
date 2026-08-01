@@ -39,7 +39,15 @@ class CorpusTest {
     @TestFactory
     fun corpus(): Stream<DynamicTest> {
         val root = corpusRoot()
-        val cases = root.listFiles { f -> f.isDirectory }.orEmpty().sortedBy { it.name }
+        // Hidden directories are never cases -- tooling leaves them here (an
+        // editor's or agent's bookkeeping dir turned up mid-session and failed
+        // the whole run as a malformed case). Skipping them costs nothing: a
+        // real case starting with '.' is not a thing. The emptiness check below
+        // is what keeps this from becoming a gate that verifies nothing, so
+        // filtering here cannot make the corpus silently vanish.
+        val cases = root.listFiles { f -> f.isDirectory && !f.name.startsWith(".") }
+            .orEmpty()
+            .sortedBy { it.name }
         check(cases.isNotEmpty()) { "no corpus cases found under ${root.path}" }
         return cases.stream().map { dir -> DynamicTest.dynamicTest(dir.name) { runCase(dir) } }
     }

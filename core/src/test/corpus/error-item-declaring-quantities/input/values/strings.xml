@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item type="plurals" name="unread">
+        <item quantity="one">%1$d message</item>
+        <item quantity="other">%1$d messages</item>
+    </item>
+</resources>
