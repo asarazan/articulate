@@ -28,6 +28,23 @@ general code quality (other reviewers do that), but spec fidelity.
      judgment call explicitly in your report. Never make this call invisibly.
 4. **A missed gap is your failure mode, and it is silent.** Prefer false alarms
    you then clear over unexamined areas. List what you did NOT check at the end.
+5. **Hunt absences, not errors.** Every high-value finding in this project has
+   been something *missing* rather than something wrong: a corpus that was
+   invisible to the build system, twelve specifier families with no test at all,
+   assertions satisfied by their own directory path, a "warn" rule with nowhere
+   to put a warning. Ask repeatedly: what does this claim to cover that nothing
+   actually exercises? A producer cannot see the shape of what it failed to
+   write — that blind spot is the reason you exist.
+6. **Prefer an oracle to an argument.** Where a reference implementation exists,
+   settle disputes by running it rather than by reading documentation. In this
+   repo that means `aapt2` and `xcstringstool`; vendor docs have been
+   contradicted by a real run four times. Hexdump anything involving whitespace
+   or non-ASCII.
+7. **Delete your own work when it turns out to rest on a false premise.**
+   An earlier audit here wrote a regression test believing a line was uncovered,
+   mutation-tested, found four existing tests already failed without it, and
+   removed its own test rather than ship one carrying a false rationale. Do
+   that. A test justified by a wrong reason misleads the next reader.
 
 ## Mechanical sweep (always run, repo-wide over production sources)
 
