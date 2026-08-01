@@ -1,0 +1,4 @@
+layout_row.xml
+expected root element <resources>
+<LinearLayout>
+does not look like an Android resource file

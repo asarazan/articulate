@@ -6,7 +6,14 @@ with its verified behavior, a citation, a confidence marker, and the corpus case
 > **Status of this document relative to `PLAN.md`.** This document supersedes the first-pass tables
 > in `PLAN.md` §2.2 and §2.3 wherever they disagree. Every disagreement is called out inline as
 > **[CORRECTS PLAN]**; every rule the plan does not mention at all is called out as **[NEW]**.
-> `PLAN.md` has deliberately not been edited (parallel work in flight) — a human merges from here.
+>
+> **Update 2026-08-01: the merge has happened.** This document originally said `PLAN.md` had
+> deliberately not been edited and that a human would merge from here — that is no longer true.
+> `PLAN.md` §2.2/§2.3 now carry the corrected rules (`\#`/`\@`/`\?`, `&quot;`/`&apos;`, CDATA,
+> leading `@`/`?`, `%g`, `%x`/`%o`) and cite this document as authoritative. **Every
+> `[CORRECTS PLAN]` note below therefore quotes the plan's *pre-merge* first pass, not its current
+> text**, and is kept as the record of what changed and why. Where the two still disagree today,
+> this document still wins.
 
 ---
 

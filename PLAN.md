@@ -34,13 +34,15 @@ Localization = Simple(StringUnit) | Plural(Map<PluralCategory, StringUnit>)
 
 - `state: "translated"` and `extractionState: "manual"` are constants, not options (settled decision — the catalog is a build artifact; state lives upstream) — and are correspondingly absent from the model entirely, living only in `CanonicalFormat`, not as defaulted fields on `Entry`/`StringUnit`.
 - **Implemented as `Map`, not `SortedMap`** (revised from this section's original illustrative sketch, 2026-07-30, during milestone-1 audit): sorting is the serializer's responsibility alone, applied once in `CanonicalJson.appendObject` at every level, rather than a property callers must maintain by constructing the right map type. A `HashMap` and a `LinkedHashMap` with different insertion order are required to serialize identically — this is exactly what `DeterminismTest`'s insertion-order test holds — which is a stronger, tested guarantee than `SortedMap` typing would have provided on its own (a `SortedMap` built with an inconsistent comparator would silently produce wrong order with no test to catch it).
-- The catalog `version` is **not** in the model. It is a single constant, `CanonicalFormat.VERSION`, sourced from the human fixture (§1.4). Until the fixture lands it holds a clearly-marked placeholder (`"1.0" /* PROVISIONAL — pending fixture, see fixtures/xcode/README.md */`).
+- The catalog `version` is **not** in the model. It is a single constant, `CanonicalFormat.VERSION`. *(Updated 2026-08-01: it is no longer provisional. `VERSION = "1.0"` is VERIFIED — see §13's "Pending human input" and `CanonicalFormat.VERSION`'s KDoc, which carries the evidence. The placeholder comment this line used to describe is gone from the code.)*
 
 ### 1.2 Serializer
 
 Hand-rolled JSON writer — **not** kotlinx-serialization pretty-printing — because we must match Xcode's idiosyncratic output byte-for-byte, and Xcode's style (e.g. the `"key" : value` spaced-colon separator seen in real catalogs) is not what any standard pretty-printer emits.
 
 Every formatting behavior that the fixture will pin down is a parameter of one object, `CanonicalFormat`, so the fixture landing changes exactly one file:
+
+> **SUPERSEDED 2026-08-01 — the table below records milestone 1's *guesses*, not current behavior, and two of them were wrong.** Every row is now VERIFIED against `xcstringstool sync` plus an Xcode GUI round-trip; the evidence lives in `CanonicalFormat`'s KDoc, which is the record of what we emit. In particular **trailing newline is `false`, not "present"**, and a newly created Xcode 26.6 catalog carries `"1.2"` (not the `1.1` this table expected) while we deliberately keep `1.0`. Read `CanonicalFormat`, never this table, for what the serializer does.
 
 | Parameter | Provisional value | Fixture decides |
 |---|---|---|
@@ -64,6 +66,8 @@ Hard invariants regardless of fixture (settled): sorted keys, no timestamps, no 
 A lenient reader (`kotlinx.serialization` `JsonElement` is fine here — parse side needn't be canonical) that loads an `.xcstrings` file into the model. Needed for the fixture round-trip test and later for `verifyStrings` diagnostics (nice diffs). Unknown fields → recorded and surfaced as warnings, not errors (Apple adds fields; accepted risk in the audit).
 
 ### 1.4 The pending human fixture — protocol, not blocker
+
+> **DISCHARGED 2026-08-01.** This protocol is history, kept for the reasoning. It assumed the only way to observe Xcode's serialization was a human open-and-save; `xcstringstool sync` does it non-interactively, and the one question that tool could not answer (the version of a *newly created* catalog) was answered by a human on 2026-08-01. **The three `PENDING` files below never landed and are not wanted** — `core/src/test/fixtures/xcode/` holds only `README.md`, which records what was verified and how to reproduce it. `RoundTripTest` stays `@Disabled` for an unrelated reason: `XcstringsReader` does not exist (§1.3, §5).
 
 The hub pre-flight checklist (in progress) produces the observed-Xcode data. The plan treats it as a **test fixture with a defined drop location**, so nothing blocks and nothing is guessed:
 
@@ -619,14 +623,15 @@ articulate/
 │       └── test/
 │           ├── kotlin/…             # unit + corpus runner (@TestFactory)
 │           ├── corpus/              # §2.1 golden cases
-│           └── fixtures/xcode/      # §1.4 — README.md now; 3 files PENDING human
+│           └── fixtures/xcode/      # §1.4 — README.md only; the 3 PENDING files were discharged, not landed
 ├── plugin/                          # milestones 4–6
 │   ├── build.gradle.kts             # java-gradle-plugin, plugin IDs per E4 ruling
 │   └── src/
 │       ├── main/kotlin/net/sarazan/articulate/gradle/
 │       │   ├── ArticulatePlugin.kt / ArticulateAndroidPlugin.kt
 │       │   ├── ArticulateExtension.kt
-│       │   └── tasks/               # GenerateStringsTask, VerifyStringsTask, (SwiftKeyLintTask)
+│       │   └── tasks/               # GenerateAndroidResTask, GenerateXcstringsTask, VerifyStringsTask, (SwiftKeyLintTask)
+│       │                            #   — §4.4 split the single GenerateStringsTask this line used to name
 │       └── test/kotlin/…            # TestKit functional tests
 └── sample/                          # included build: end-to-end smoke
     ├── settings.gradle.kts
@@ -669,17 +674,19 @@ Blocking first; later items can wait until their milestone starts.
 
 ### Still open
 
-Only two decisions remain, neither blocking any implemented or specified milestone:
+**None — both former entries were ruled on 2026-07-31.** This list said "only two decisions remain" long after they stopped remaining; §13's "Still-open decisions" is the live record and says the same thing.
 
-- **D8 — SwiftPM story** (§8): documented workaround, no v0 code (recommended). *Docs-only; premise verified — `xcstringstool` lives in `Xcode.app/Contents/Developer/usr/bin/`, not the Swift toolchain, so `swift build` genuinely cannot reach it. Rule any time before release.*
-- **D11 — Publishing** (§E5): Plugin Portal first (recommended). *Needed before the first release, and it gates the Plugin Portal name-collision check still open on the hub pre-flight list.*
+- ✅ **D8 — SwiftPM story** (§8): **DECIDED 2026-07-31 — `docs/swiftpm.md`, no v0 code**, but explicitly flagged to revisit before v0 publishes (see §8 for the three-part breakdown of what is and isn't broken). *Premise verified: `xcstringstool` lives in `Xcode.app/Contents/Developer/usr/bin/`, not the Swift toolchain, so `swift build` genuinely cannot reach it.* **The `docs/swiftpm.md` the ruling calls for does not exist yet** — the decision is made, the deliverable is outstanding.
+- ✅ **D11 — Publishing** (§E5): **DECIDED 2026-07-31 — Gradle Plugin Portal first**; Maven Central can follow without disrupting anyone. Still gates the Portal name-collision check on the hub pre-flight list.
 
 **Design item carried forward, not a decision:** milestone 6's scanner should be re-specced to drive off `xcstringstool generate-symbols --language swift` output rather than the regex heuristic currently sketched in §6 — exact instead of approximate. Revisit before anyone writes that regex; it does not affect v0, which excludes m6 per D7.
 
 ### Pending human input (not decisions)
 
-- **The Xcode catalog `version`** (§1.4) — reduced 2026-07-31 from a four-step human protocol to a single question. `xcstringstool sync` rewrites a catalog in Apple's own format non-interactively, so indent, separator, ordering, empty-object shape, escaping, encoding and the trailing-newline rule are all now **verified without the GUI**. That verification found a real defect: `TRAILING_NEWLINE` was provisionally `true` and is actually `false` — one byte that would have made every generated catalog differ from Xcode's and defeated the drift gate. All that remains is what `"version"` a *newly created* Xcode String Catalog carries, since `sync` preserves rather than normalizes it. Ask: File › New › File › String Catalog, report the version line. See `core/src/test/fixtures/xcode/README.md`.
-- **`zh-rSG` / `zh-rMO` and other non-CN/TW/HK Chinese regions** (§3.1). Currently fall through to plain region tags (`zh-SG`, `zh-MO`), pinned by a test so the behavior cannot drift silently. Evidence genuinely cuts both ways: CLDR and Apple's `Locale.Language.maximalIdentifier` treat Singapore as Simplified and Macau as Traditional, but D5a's decided CN/TW/HK rule is itself asymmetric in a way matching neither Apple's maximal nor minimal output, and Apple's own shipped apps use both conventions. Deliberately left unruled rather than compounding a guess.
+**Both items below are closed. Kept for the reasoning; see §13's "Pending human input" for the closing evidence.**
+
+- ~~**The Xcode catalog `version`**~~ (§1.4) — **CLOSED 2026-08-01.** Reduced 2026-07-31 from a four-step human protocol to a single question: `xcstringstool sync` rewrites a catalog in Apple's own format non-interactively, so indent, separator, ordering, empty-object shape, escaping, encoding and the trailing-newline rule were all **verified without the GUI**. That verification found a real defect: `TRAILING_NEWLINE` was provisionally `true` and is actually `false` — one byte that would have made every generated catalog differ from Xcode's and defeated the drift gate. The remaining question — what `"version"` a *newly created* catalog carries — was answered by a human: Xcode 26.6 writes `"1.2"`, and we deliberately keep `1.0`, which a full Xcode GUI round-trip left untouched. See `CanonicalFormat.VERSION`'s KDoc and `core/src/test/fixtures/xcode/README.md`.
+- ~~**`zh-rSG` / `zh-rMO` and other non-CN/TW/HK Chinese regions**~~ (§3.1) — **DECIDED 2026-07-31: keep the fallthrough** (`zh-SG`, `zh-MO`), pinned by a test so the behavior cannot drift silently. Evidence genuinely cuts both ways: CLDR and Apple's `Locale.Language.maximalIdentifier` treat Singapore as Simplified and Macau as Traditional, but D5a's decided CN/TW/HK rule is itself asymmetric in a way matching neither Apple's maximal nor minimal output, and Apple's own shipped apps use both conventions — so a fifth rule would compound a guess rather than resolve one. `localeOverrides` already lets anyone map them explicitly.
 
 ---
 
@@ -737,7 +744,7 @@ The launcher is unavoidably environmental — `gradlew` is a shell script that n
 
 ## 13. Pre-v0 checklist
 
-D7 sets v0 = milestones 1–5. **All five are now implemented and audited** (216 tests). This section tracks what stands between here and publishing, so none of it is rediscovered later. Nothing below blocks development; everything below blocks a release.
+D7 sets v0 = milestones 1–5. **All five are now implemented and audited** (236 tests: 203 in `:core`, one of them the parked `RoundTripTest`, plus 33 in `:plugin` — counted 2026-08-01 from the JUnit XML, not from memory). This section tracks what stands between here and publishing, so none of it is rediscovered later. Nothing below blocks development; everything below blocks a release.
 
 ### Ruled: defer, but fix before publishing
 
@@ -757,6 +764,30 @@ Not a warning — a build failure, reproduced on both `:app:help` and a real com
 
 *Cheapest next step, now done (2026-08-01):* **AGP is not the blocker — we are.** A two-module Android project (app depending on lib, AGP 9.1, no Articulate) configures successfully with `org.gradle.unsafe.isolated-projects=true`. So the redesign cannot be deferred to "when AGP catches up"; it is genuinely ours to do before v0 publishes. *Caveat: the probe ran `:app:help`, which exercises configuration — where isolated projects applies and where our failure occurs — but a full `assembleDebug` would be a stronger check.*
 
+### Found by the publishing audit (2026-08-01) — not ruled, needs a human
+
+**Release-blocking: the two plugin IDs break when a consumer applies them from separate module `plugins {}` blocks with versions.** Reproduced against the *published* artifact (`publishToMavenLocal`, consumed from a genuinely separate build via `pluginManagement { repositories { mavenLocal() } }`, Gradle 8.7 / AGP 8.5.2):
+
+```
+> org.gradle.api.InvalidUserDataException: The task 'generateAndroidRes'
+  (net.sarazan.articulate.gradle.tasks.GenerateAndroidResTask) is not a subclass
+  of the given type (net.sarazan.articulate.gradle.tasks.GenerateAndroidResTask).
+```
+
+The same type name twice, because they are two `Class` objects from two classloaders. Gradle keys a plugin classloader on the *set* of jars a build script requests, so `:i18n` requesting `net.sarazan.articulate` and `:app` requesting `net.sarazan.articulate.android` **plus AGP** get separate copies of our classes — and `ArticulateAndroidPlugin`'s `i18nProject.tasks.named("generateAndroidRes", GenerateAndroidResTask::class.java)` compares identity across that boundary. Verified by elimination: make both modules' plugin-DSL classpaths identical (AGP applied some other way) and it works; declare all plugin IDs in the **root** build script with `apply false` and it works (a real `assembleDebug` produced an APK whose `R.string.hello` resolved). Both are workarounds, not fixes.
+
+*Why no test caught it:* every functional test uses `GradleRunner.withPluginClasspath()`, which injects one classpath for the whole fixture build — a single classloader, so cross-project class identity always held. The failing shape is unreachable through TestKit's default injection.
+
+*Options, for a human:* (a) stop crossing the boundary with type identity — look the task up untyped and reach `androidResDir` reflectively, which makes the natural layout work; (b) keep the typed lookup but catch the mismatch and re-throw naming the cause and the one-line fix, which satisfies §4.1 lesson 6 but leaves the natural layout unsupported; (c) the §13 isolated-projects redesign above (consumable configuration) removes the cross-project task lookup entirely and would close this too — the two problems have one fix. **(c) is the same work already ruled "fix before publishing", so this finding raises its priority rather than adding a separate one.** The auditor deliberately did not implement any of them (`AGENTS.md`: the auditor must never be the implementer).
+
+**Silent loss: `<item type="string">` and `<array>` are dropped without a diagnostic.** `aapt2` (oracle, 2026-08-01) compiles
+
+```xml
+<item type="string" name="item_string">Item string</item>
+```
+
+into `string/item_string`, indistinguishable from a `<string>` — and an `<array>` of string items into a string array. Both are invisible to us: `AndroidStringsParser`'s top-level `when` sends unknown elements to `skipElement`, and `ValuesFileClassifier.CONTENT_ELEMENTS` is exactly `{string, plurals, string-array}`. So a `strings.xml` using the general `<item type=…>` form loses strings silently, and D6's loud `<string-array>` rejection is bypassed by spelling it `<array>`. §4.3's literal table is implemented correctly; the table's *enumeration* is what is incomplete. Note any fix must key on the `type` attribute — bare `<item type="id" …>` is common and genuinely presentation.
+
 ### Correctness items from the M4/M5 audit
 
 - ~~`markupPolicy` silently no-ops~~ — **closed 2026-07-31.** Any non-`ERROR` value now fails at configuration time, naming the value, stating that only `ERROR` ships in v0, and pointing at D4.
@@ -768,7 +799,9 @@ Not a warning — a build failure, reproduced on both `:app:help` and a real com
 - ~~No CI configuration~~ — **closed 2026-07-31.** `.github/workflows/ci.yml`: wrapper validation, `:core:test`, `:plugin:test`, and a gate job requiring all three. Everything runs on Linux; nothing in the suite needs Xcode, and macOS runners cost ~10× for no benefit. **`ARTICULATE_REQUIRE_ANDROID_SDK=true` is set for the plugin job**, so a missing SDK fails the build instead of silently skipping the five Android tests — a green build can no longer mean "tested nothing".
 - ~~AGP 9.1 cell never run~~ — **closed 2026-07-31, and it found something.** The cell is real (separate `PluginUnderTestMetadata` resolving AGP 9.1 into its own classpath, avoiding collision with the 8.5.2 floor). It runs under the repo's own Gradle 9.5.0, which satisfies AGP 9.1's ≥9.3.1 requirement. It immediately surfaced the version-dependent output-relocation behavior now recorded in §4.4 — a claim the floor cell alone would have kept wrong.
 - ~~`gradleFloor` unreferenced~~ — **closed 2026-07-31**; the dead catalog entry was removed, leaving `FunctionalTestSupport.GRADLE_FLOOR_VERSION` as the single source.
-- **Still open: the workflow has never actually executed.** Everything checkable locally was checked — YAML parses, `actionlint` clean, all action versions and both SDK package IDs verified against live manifests (note it is `platforms;android-37.0`, not `android-37`). What awaits a first real run: SDK installation on a hosted runner, network behavior, and the job graph end to end.
+- ~~The workflow has never actually executed~~ — **the first run has now happened and was green.** That proves the workflow *runs* (SDK installation on a hosted runner, network behavior, job graph) — it does not prove the workflow *fails when it should*.
+- **Still open: nothing guards the SDK strictness switch.** `ARTICULATE_REQUIRE_ANDROID_SDK=true` only changes behavior when **no** SDK is found, and CI installs one — so if `requireOrSkipAndroidSdk` stopped reading the variable tomorrow, every CI run would stay green and the five Android tests would go back to skipping silently the day an SDK install broke. `FunctionalTestSupportTest` covers the pure decision logic, and the env var *is* verified to reach the Gradle test JVM (audit probe, 2026-08-01: an assertion on `System.getenv` passes with the variable exported and fails without it), but the wiring between them is untested. A cheap closer: one CI step that runs a single Android test with the SDK deliberately unreachable and asserts the build fails.
+- **Still open: CI never builds or validates the publishable artifact.** `:core:test` + `:plugin:test` never run `publishToMavenLocal`, `publishPlugins --validate-only`, or anything that consumes the published jar — so the entire publishing configuration (coordinates, POM, bundled `core`, marker resolution) is outside CI's reach. See the release-blocker note below.
 
 ### Spec gap
 

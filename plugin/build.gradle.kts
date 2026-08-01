@@ -29,6 +29,11 @@ version = "0.1.0"
 // derives the published artifactId from the project name independently.
 base.archivesName.set("articulate-gradle-plugin")
 
+// Shared with the `gradlePlugin` block below so the POM and the Portal listing
+// cannot drift apart.
+val articulateDescription =
+    "Generates an Xcode String Catalog from Android strings.xml, and verifies it hasn't drifted."
+
 publishing {
     publications {
         // Only the implementation publication. The two `*.gradle.plugin` marker
@@ -38,6 +43,28 @@ publishing {
         withType<MavenPublication>().configureEach {
             if (name == "pluginMaven") {
                 artifactId = "articulate-gradle-plugin"
+                pom {
+                    name.set("Articulate")
+                    description.set(articulateDescription)
+                }
+            }
+
+            // The Apache-2.0 grant lives in `LICENSE` at the repo root, which
+            // puts it in the *source* tree and nowhere else -- nothing copies
+            // it into published metadata, so without this block every POM we
+            // publish declares no license at all. Verified by inspecting the
+            // generated POMs under ~/.m2 before this was added: no <licenses>,
+            // no <url>. Published coordinates are immutable, so an omission
+            // here is permanent for whatever version ships with it.
+            pom {
+                url.set("https://github.com/asarazan/articulate")
+                licenses {
+                    license {
+                        name.set("The Apache License, Version 2.0")
+                        url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                        distribution.set("repo")
+                    }
+                }
             }
         }
     }
@@ -130,7 +157,7 @@ gradlePlugin {
             id = "net.sarazan.articulate"
             implementationClass = "net.sarazan.articulate.gradle.ArticulatePlugin"
             displayName = "Articulate"
-            description = "Generates an Xcode String Catalog from Android strings.xml, and verifies it hasn't drifted."
+            description = articulateDescription
             tags.set(listOf("android", "ios", "kotlin-multiplatform", "localization", "i18n", "xcstrings"))
         }
         create("articulateAndroid") {

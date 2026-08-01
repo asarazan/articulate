@@ -12,12 +12,19 @@ package net.sarazan.articulate.core.serialize
  * works if our output is *exactly* what Xcode itself would write, so that
  * opening the file in Xcode never rewrites it.
  *
- * ## Provisional values
+ * ## Verification status
  *
- * Values marked PROVISIONAL below are best guesses pending the observed-Xcode
- * fixture (`core/src/test/fixtures/xcode/`, see its README). They are gathered
- * here specifically so that landing the fixture changes exactly one file. When
- * it lands: correct these, run `regenerateCorpus`, review the diff.
+ * **Nothing here is provisional any more** (as of 2026-08-01). Every value below
+ * is either VERIFIED against Apple's own tooling — `xcstringstool sync` output
+ * plus a full Xcode GUI round-trip, evidence in each constant's KDoc — or a
+ * settled project decision ([EXTRACTION_STATE], [STATE]). An earlier revision of
+ * this doc described values "marked PROVISIONAL below"; none are, and one of the
+ * guesses they replaced ([TRAILING_NEWLINE]) turned out to be wrong by exactly
+ * the one byte that would have defeated the drift gate.
+ *
+ * They stay gathered in one object so a future Xcode format change touches
+ * exactly one file: correct the constant, run `regenerateCorpus`, review the
+ * diff. See `core/src/test/fixtures/xcode/README.md` for how to re-observe.
  *
  * Nothing downstream should hardcode any of these.
  */

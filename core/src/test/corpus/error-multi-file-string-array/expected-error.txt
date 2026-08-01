@@ -1,0 +1,5 @@
+arrays.xml
+<string-array>
+weekdays
+not yet supported
+into strings.xml

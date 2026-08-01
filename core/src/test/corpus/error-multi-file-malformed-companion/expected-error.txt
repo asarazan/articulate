@@ -1,0 +1,3 @@
+dimens.xml
+not well-formed XML
+cannot confirm it carries no localizable content

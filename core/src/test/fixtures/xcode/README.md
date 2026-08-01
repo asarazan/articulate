@@ -18,7 +18,7 @@ own tool and diffing. Recipe at the bottom.
 | `MEMBER_ORDER` | alphabetical at every level (top-level, entry members, locales, plural categories) |
 | `BLANK_LINE_IN_EMPTY_OBJECT` | `true` — an empty object renders as `{`, a blank line, then the closing brace |
 | `TRAILING_NEWLINE` | **`false`** — the file ends at the final `}`, last byte `0x7d` |
-| `LOWERCASE_HEX_ESCAPES` | `true` — ``, lowercase |
+| `LOWERCASE_HEX_ESCAPES` | `true` — `\u0001`, lowercase |
 | non-ASCII | written as **literal UTF-8**, not escaped (`café`, `日本語`, and U+00A0 all survive verbatim) |
 | shorthand escapes | `\t` `\n` `\"` `\\` `\f` all used in preference to `\uXXXX` |
 | `CHARSET` / line endings | UTF-8, no BOM, LF only |
@@ -28,23 +28,23 @@ would have made every generated catalog differ from what Xcode writes, so Xcode
 would rewrite on open — defeating the drift gate the whole design rests on. It
 is the reason this protocol existed, and it was caught without the GUI step.
 
-## What is still open — one small question
+## Nothing is still open — closed 2026-08-01
 
-**What `"version"` does a *newly created* Xcode String Catalog carry?**
+The last question was **what `"version"` a *newly created* Xcode String Catalog
+carries**, which `xcstringstool sync` cannot answer because it *preserves*
+whatever version the file already has (`1.0` stays `1.0`) rather than
+normalizing.
 
-`xcstringstool sync` **preserves** whatever version the file already has (`1.0`
-stays `1.0`, `1.1` stays `1.1`) rather than normalizing, so it cannot answer
-this. Xcode 26 is documented to have moved `1.0` → `1.1`, and we currently emit
-`1.0`.
+Answered by a human: **Xcode 26.6 writes `"1.2"`** for a new catalog (the Brief
+predicted `1.1`, which was already stale). **We deliberately keep `1.0`** — it
+expresses everything we emit, and a real Articulate-generated catalog opened,
+edited and saved in the Xcode GUI came back with `"version" : "1.0"` untouched,
+along with byte-identical indentation, separators, ordering and absent trailing
+newline. That round-trip is the proof this whole protocol was built to obtain.
 
-To settle it: in Xcode, **File › New › File › String Catalog**, save it, and
-report the `"version"` line. That is the entire remaining ask — no hand-writing,
-no diffing.
-
-Note this is lower-stakes than it first appeared: since `sync` preserves rather
-than rewrites the version, an existing catalog is not churned by tooling. The
-risk is confined to what the Xcode GUI does on first open of a file whose
-version differs from its native one.
+Also observed in that round-trip: editing a source-language string makes Xcode
+mark sibling locales `needs_review` — correct behavior, and exactly the drift
+`verifyStrings` exists to catch.
 
 ## `RoundTripTest`
 
