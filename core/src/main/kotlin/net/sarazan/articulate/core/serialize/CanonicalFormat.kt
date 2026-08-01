@@ -26,13 +26,27 @@ object CanonicalFormat {
     /**
      * The catalog schema version Xcode writes.
      *
-     * STILL PROVISIONAL — the one value the 2026-07-31 verification could not
-     * settle. `xcstringstool sync` **preserves** whatever version the file already
-     * carries (`1.0` stays `1.0`, `1.1` stays `1.1`) rather than normalizing, so
-     * emitting `1.0` is at least stable against that tool. What a *newly created*
-     * Xcode catalog gets is still unknown, and Xcode 26 is documented to have
-     * moved `1.0` → `1.1`. Resolve by creating a String Catalog in Xcode and
-     * reading its version line — see `core/src/test/fixtures/xcode/README.md`.
+     * VERIFIED 2026-08-01 — **keep `1.0`; Xcode does not upgrade it.**
+     *
+     * Settled by round-tripping a real Articulate-generated catalog through the
+     * Xcode GUI: the file was edited and saved, so Xcode fully rewrote it — and
+     * `"version" : "1.0"` survived untouched. The only differences from our
+     * output were the two semantically edited fields. Indentation, separators,
+     * member ordering and the absent trailing newline all came back byte-identical.
+     *
+     * That doubles as the round-trip proof milestone 1's fixture protocol was
+     * built to obtain: **a full Xcode rewrite of our output reproduces our
+     * output.** Demonstrated, not argued.
+     *
+     * A *newly created* Xcode 26.6 catalog carries `"1.2"` (the Brief predicted
+     * `1.1`, which was already stale). We deliberately do not match it: `1.0`
+     * expresses everything we emit, is accepted without rewriting, and stays
+     * readable to older Xcode versions. Emitting a newer schema version than our
+     * content requires would trade compatibility for nothing.
+     *
+     * Also observed: editing a source-language string makes Xcode mark sibling
+     * locales `needs_review`. Correct Xcode behavior, and it means hand-editing a
+     * generated catalog produces exactly the drift §5's gate exists to catch.
      */
     const val VERSION: String = "1.0"
 

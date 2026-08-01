@@ -755,7 +755,7 @@ Not a warning — a build failure, reproduced on both `:app:help` and a real com
 
 *The fix, when taken:* `:i18n` exposes the generated tree as a **consumable configuration** (e.g. `artifactType = "android-res-dir"`, `outgoing.artifact(generateAndroidRes.flatMap { it.androidResDir })`); `:app` consumes it as a dependency rather than reaching into another project's task container. That is dependency resolution rather than project-container access, which isolated projects permits, and it carries task dependencies implicitly so `evaluationDependsOn` disappears. Cost: `addGeneratedSourceDirectory` wants a `TaskProvider`, so `:app` likely needs a small per-variant task consuming the artifact.
 
-*Cheapest next step before committing to the redesign:* check whether **AGP 8.5.2 is itself isolated-projects-clean**. If AGP blocks it regardless, our contribution is moot until AGP catches up, and the work can wait for that.
+*Cheapest next step, now done (2026-08-01):* **AGP is not the blocker — we are.** A two-module Android project (app depending on lib, AGP 9.1, no Articulate) configures successfully with `org.gradle.unsafe.isolated-projects=true`. So the redesign cannot be deferred to "when AGP catches up"; it is genuinely ours to do before v0 publishes. *Caveat: the probe ran `:app:help`, which exercises configuration — where isolated projects applies and where our failure occurs — but a full `assembleDebug` would be a stronger check.*
 
 ### Correctness items from the M4/M5 audit
 
@@ -780,7 +780,7 @@ Not a warning — a build failure, reproduced on both `:app:help` and a real com
 
 ### Pending human input
 
-- **The Xcode catalog `version`** — one question, see `core/src/test/fixtures/xcode/README.md`. Everything else about Xcode's serialization is now verified.
+- ~~The Xcode catalog `version`~~ — **CLOSED 2026-08-01. The fixture protocol is complete; nothing about Xcode's serialization remains unverified.** Round-tripping a real generated catalog through the Xcode GUI (edited and saved, so Xcode fully rewrote it) left `"version" : "1.0"` untouched, and reproduced our indentation, separators, ordering and absent trailing newline **byte-identically** — the round-trip proof §1.4 was designed to obtain. A newly created Xcode 26.6 catalog carries `1.2`; we deliberately keep `1.0`, which expresses everything we emit, is accepted without rewriting, and stays readable to older Xcode. Also learned: editing a source string makes Xcode mark sibling locales `needs_review`, so hand-editing a generated catalog produces exactly the drift §5 catches.
 - ~~`zh-rSG` / `zh-rMO` locale policy~~ — **DECIDED 2026-07-31: keep the fallthrough** (`zh-SG`, `zh-MO`). It loses no information, `localeOverrides` already lets anyone map them explicitly, and D5a's CN/TW/HK rule is itself asymmetric in a way matching neither Apple's maximal nor minimal identifier output — so a fifth rule would compound a guess rather than resolve one. The existing test pins the behavior.
 
 ---
