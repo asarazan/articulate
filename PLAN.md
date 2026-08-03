@@ -876,6 +876,20 @@ The classloader defect was the more urgent of the two and was found only by the 
 
 **What this rules *out*, honestly.** Shared-presentation KMP — a `commonMain` ViewModel choosing copy — is a real architecture, and for it a generated key→`R.string` map would remove genuine boilerplate. That case is deferred, not denied. It stays clean to add later because generation is purely additive, and notably it is the *mechanical* half (keys we own) without the *inferential* half (domain clusters we would be guessing at). Revisit if a real consumer hits it, or if copy must be selected dynamically (server-driven or A/B'd), where a compile-time sealed type genuinely cannot apply.
 
+### Amendment 2026-08-03 — the runtime variant, considered and declined
+
+A follow-up design pass proposed going further: `expect`/`actual` resource-ID types, a generated per-platform binding map (key → `R.string` `Int` on Android, key string on iOS), and an `Articulate.getString(id)` callable from `commonMain`. **Declined.** It targets a real gap — shared *presentation*, where common UI means there is no platform edge to map at — but three objections held:
+
+1. **It inverts the differentiator.** Resolving through our runtime means the iOS side stops reading a native String Catalog. Articulate becomes a localization framework competing with Compose Resources and moko-resources, not a build tool producing native artifacts. `expect`/`actual` also makes the feature KMP-only, contradicting pitch #5.
+2. **The iOS lookup path is hostile.** Kotlin/Native must resolve a `Bundle` it cannot know, and — per `docs/swiftpm.md`, verified 2026-08-01 — an uncompiled `.xcstrings` returns the *key*. A runtime lookup walks straight into a silent failure.
+3. **Format arguments move correctness to runtime.** `getString(id, arg)` must guarantee identical output from Java `Formatter` and CFString/printf, which already disagree on `%d`. That is unreachable by the build-time differential corpus that is this project's entire quality lever.
+
+**What survives, still deferred:** a flat generated token plus native resolution on both sides — no runtime. A `@JvmInline value class` beats an enum for the token (inlined literals; an enum drags in `values()`/`valueOf()`/`entries` and a field per constant). Android needs key → `R.string`; the representation to prototype **first** is an `<array>` resource emitted beside the generated `values/`, since that is data rather than code and so has no method-size or method-count cost at all.
+
+**The accounting matters more than the design.** Not building this costs **zero** — it is the status quo, not a gap. Building it *acquires* three costs: every string becomes reachable so the resource shrinker can no longer strip unused copy; the generated mapping has a size cliff at large key counts (the 65,535-**byte** per-method bytecode limit — note this is *not* the 64K method-**reference** limit, which multidex does solve); and the token type becomes public API, making a key rename source-breaking. Whether ergonomics beats shrinking depends on string count and app-size budget — things the consumer can see and we cannot. A consumer wanting an exhaustive map can write one today and own that trade knowingly.
+
+**Research gap, flagged not fixed.** The Market Audit asked who converts Android strings to Xcode catalogs; it never asked how KMP projects localize today. **Compose Multiplatform Resources consumes `composeResources/values/strings.xml` — our exact input format** — so a Compose MP consumer may get common-layer resolution for free from JetBrains' own library while Articulate produces the `.xcstrings`. **Unverified inference from the docs**; worth an end-to-end check before it goes in the README, and worth a Market Audit scope note (flagged for the human, not edited).
+
 **Consequence for this section.** §14's stated purpose is discharged. The sample keeps `:shared`, but its job changes from *"exhibit the keys problem"* to *"exhibit the recommended pattern"* — which is the better sample regardless. Everything below is retained as the record of what the sample had to contain for this ruling to be possible.
 
 ---

@@ -1,6 +1,9 @@
 # Gradle
 .gradle/
 build/
+# Kotlin 2.x build metadata + error logs (trailing comments are NOT
+# supported in .gitignore -- they become part of the pattern)
+.kotlin/
 # JVM heap dumps -- Gradle writes these on OOM and they are enormous
 *.hprof
 
