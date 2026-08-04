@@ -115,7 +115,7 @@ Articulate gives iOS a real `.xcstrings`, so all copy — presenter-driven and v
 
 | | Compose Resources | Articulate |
 |---|---|---|
-| Common-layer access from Kotlin | Yes | Not yet (see below) |
+| Common-layer access from Kotlin | Yes | **Not yet** — scoped, see [Shared code and string keys](#shared-code-and-string-keys) |
 | Compose Multiplatform UI | Yes | n/a |
 | **Native SwiftUI views** | **No** | **Yes** |
 | Output Xcode can edit/translate | No | Yes — a real String Catalog |
@@ -126,11 +126,25 @@ The two are not mutually exclusive: both read the same `strings.xml`, so a proje
 
 ## Shared code and string keys
 
-Articulate generates no Kotlin and no keys object. Shared code that needs to name a string should
-return a **sealed type** describing a domain outcome, which each platform maps to its own localized
-string at its own edge — native, exhaustiveness-checked, no reflection, no generated lookup table.
-[`sample/shared`](sample/shared) demonstrates it and `PLAN.md` §14 records why generating the type
-instead would mean inferring domain structure from a flat key namespace.
+**Today, Articulate generates no Kotlin.** Shared code that needs to name a string returns a
+**sealed type** describing a domain outcome, and each platform maps that outcome to its own
+localized string at its own edge — native, exhaustiveness-checked by the compiler, no reflection and
+no lookup table. [`sample/shared`](sample/shared) demonstrates it.
+
+That pattern is the right answer for *domain outcomes* and will stay recommended. It is a weaker
+answer at scale: naming two hundred strings from a shared presenter is boilerplate a generator
+should eat.
+
+**Generated common-layer tokens are scoped, not built** — a flat token type in `commonMain` with
+resolution still happening natively on each side (Android through `R.string`, iOS through the key
+`String(localized:table:)` already takes). Explicitly *not* a runtime: no `Articulate.getString`, for
+reasons `PLAN.md` §14 records in detail — it would stop iOS reading a native catalog, and it would
+move format-argument correctness to runtime where this project's build-time differential testing
+cannot reach it.
+
+Until that lands, the honest position is the one in the comparison above: if you need
+`commonMain` string accessors *today* and your UI is Compose Multiplatform, Compose Resources
+already does it.
 
 ## Maturity
 
