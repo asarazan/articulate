@@ -529,6 +529,24 @@ Reproduction that is known to fail today is recorded in §13.
 
 **Try the checked-in sample as the regression vehicle first.** §14's sample already needs per-module `plugins {}` blocks to be realistic, and a composite build (`includeBuild("..")`) may produce the same distinct-classloader split as a published artifact — in which case one artifact serves as demo, integration test, and regression test at once. Verify it actually reproduces the failure before relying on it; fall back to publishing into a build-local repository if it does not.
 
+#### IDE visibility of generated Android res — OPEN DEFECT, diagnosed 2026-08-03, three fixes attempted and reverted
+
+**Symptom.** `R.string.your_key` is red in Android Studio's editor while every build compiles it. A Gradle sync does not fix it, because sync only configures the model — it never executes tasks, so the generated directory does not exist to be indexed.
+
+**Root cause, sourced.** `variant.sources.res.addGeneratedSourceDirectory(...)` registers the directory for the **build** but never puts it in the **IDE model** — [AGP issue 232805583](https://issuetracker.google.com/issues/232805583). React Native hit the same wall and reverted to the sourceSets API ([facebook/react-native@caa79b7](https://github.com/facebook/react-native/commit/caa79b7c017accd91c0e852bd701ef3f21ac0e6d)). **This invalidates §4.5's "never use the legacy `sourceSets["main"].res.srcDir`" ruling**, which was settled for classloader/relocation reasons without knowing the Variant API is invisible to the IDE.
+
+**Three attempts, all reverted. Each failure is a constraint on the real fix — do not re-run them:**
+
+| Attempt | Result |
+|---|---|
+| `res.srcDir(taskProvider)` alone | Task **never executed**; `cannot find symbol: variable string`. `srcDir` does not carry the producing task's dependency. |
+| `res.srcDir(files(...).builtBy(task))` **+** `addGeneratedSourceDirectory` | **All 247 tests green, IDE still broken.** `addGeneratedSourceDirectory` *relocates* the output to `build/generated/res/<taskName>`, so the path advertised to the IDE (`build/generated/articulate/res`) stays permanently **empty**. Nearly shipped; caught only by listing the directory. |
+| `res.srcDir(files(...).builtBy(task))` alone, Variant API removed | Resources never reach AGP's resource merge; `cannot find symbol` again. The build genuinely needs the Variant API registration. |
+
+**The shape left to try.** Keep `addGeneratedSourceDirectory` for the build graph, and point `sourceSets["main"].res.srcDir` at **AGP's relocated path** (`build/generated/res/resolveArticulateAndroidRes`) rather than the task's own convention path. **Pass criterion — both required:** full suite green **and** that relocated path present in `:androidApp:sourceSets` output, then human confirmation in Studio. A green suite alone is explicitly *not* sufficient here; attempt 2 proves it.
+
+**Why this blocks more than it looks.** The `commonMain` token feature (§14 amendment) will hit the same defect for generated *source*, on the exact API users would be told to call. Fix this first.
+
 ### 4.6 Configuration-cache rules — non-negotiable, and the reason M4's audit is Opus
 
 Config-cache violations are the archetypal silent failure: everything works until someone enables the cache, then breaks confusingly and far from the cause.

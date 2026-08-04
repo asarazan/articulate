@@ -103,6 +103,27 @@ articulate {
 Configuration-cache compatible. Kotlin Multiplatform is **not** required — see
 [`sample/`](sample/), whose README says exactly where KMP is and isn't load-bearing.
 
+## Why not Compose Multiplatform Resources?
+
+Fair question, and the honest answer is that it depends on what your iOS UI is made of.
+
+[Compose Resources](https://kotlinlang.org/docs/multiplatform/compose-localize-strings.html) reads `composeResources/values/strings.xml` — the same Android format Articulate consumes — and generates `Res.string.*` accessors for `commonMain`. **If your UI is Compose Multiplatform, use it.** It is maintained by JetBrains, it handles both platforms, and Articulate adds nothing you need.
+
+**Articulate is for native SwiftUI plus shared Kotlin.** There, Compose Resources cannot help your view layer at all: `stringResource()` is a Compose runtime API and SwiftUI cannot call it. You could route copy through a shared presenter and resolve it in Kotlin — but not all copy flows through a presenter. Button titles, section headers, empty states, error banners, accessibility labels and `Info.plist` strings live in the view. That leaves two bad options: force every string through the presenter, or keep view-layer copy in a separate native catalog and accept **two sources of truth** — the exact problem you adopted a tool to avoid.
+
+Articulate gives iOS a real `.xcstrings`, so all copy — presenter-driven and view-level alike — comes from one source and arrives in the format Xcode natively edits, translates, and exports. No Compose dependency in a native app, and your iOS side keeps its own tooling.
+
+| | Compose Resources | Articulate |
+|---|---|---|
+| Common-layer access from Kotlin | Yes | Not yet (see below) |
+| Compose Multiplatform UI | Yes | n/a |
+| **Native SwiftUI views** | **No** | **Yes** |
+| Output Xcode can edit/translate | No | Yes — a real String Catalog |
+| Android `R.string` | Via Compose | Native |
+| Runtime dependency | Compose runtime | None |
+
+The two are not mutually exclusive: both read the same `strings.xml`, so a project can use Compose Resources for common UI and Articulate for the native iOS catalog off one source tree.
+
 ## Shared code and string keys
 
 Articulate generates no Kotlin and no keys object. Shared code that needs to name a string should
