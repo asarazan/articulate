@@ -93,7 +93,7 @@ internal object FunctionalTestSupport {
      * live fixture: `8.5.2`, i.e. D9's floor. Re-verify by that route, never
      * by reading this constant.
      */
-    const val AGP_VERSION = "8.5.2"
+    const val AGP_VERSION = "9.1.0"
 
     /**
      * The Gradle version paired with [AGP_VERSION] (D9's floor, §E2).
@@ -106,8 +106,22 @@ internal object FunctionalTestSupport {
      */
     const val GRADLE_FLOOR_VERSION = "8.7"
 
-    /** `compileSdk`/`targetSdk`: the maximum AGP 8.5 supports (a ceiling, not a "tested up to" -- see the milestone 4/5 report). */
-    const val COMPILE_SDK = 34
+    /**
+     * The Gradle floor for **Android** fixtures, which is now higher than the
+     * base plugin's (D9, revised 2026-08-03 with the AGP 9.1 bump). AGP 9
+     * requires Gradle >= 9.1.0, but `net.sarazan.articulate` itself has no AGP
+     * on its classpath at all (D10) and still works on [GRADLE_FLOOR_VERSION].
+     *
+     * Kept as a **separate** constant rather than raising the shared one: a
+     * single floor would have silently claimed every non-Android consumer needs
+     * Gradle 9.1 to use the base plugin, narrowing the supported range with
+     * nothing failing to reveal it. [GradleFloorFunctionalTest] still proves the
+     * base plugin at 8.7; only Android fixtures pin this.
+     */
+    const val ANDROID_GRADLE_FLOOR_VERSION = "9.3.1"
+
+    /** `compileSdk`/`targetSdk` for Android fixtures. 37 because AGP 9.1 is the floor now and only SDK 34/37 are installed. */
+    const val COMPILE_SDK = 37
 
     /**
      * Task 3 / D9's upper matrix cell (PLAN.md §E2): the AGP version

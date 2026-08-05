@@ -1,7 +1,7 @@
 package net.sarazan.articulate.gradle
 
 import net.sarazan.articulate.gradle.FunctionalTestSupport.COMPILE_SDK
-import net.sarazan.articulate.gradle.FunctionalTestSupport.GRADLE_FLOOR_VERSION
+import net.sarazan.articulate.gradle.FunctionalTestSupport.ANDROID_GRADLE_FLOOR_VERSION
 import net.sarazan.articulate.gradle.FunctionalTestSupport.requireOrSkipAndroidSdk
 import net.sarazan.articulate.gradle.FunctionalTestSupport.writeAndroidAppModule
 import net.sarazan.articulate.gradle.FunctionalTestSupport.writeAndroidSettings
@@ -47,7 +47,7 @@ import java.nio.file.Path
  *    8.7-8.9, and `compileSdk 34` is the ceiling AGP 8.5 supports (not "tested
  *    up to"; going higher either fails outright or passes against a
  *    configuration no floor consumer can run). Every fixture here therefore
- *    pins `.withGradleVersion(GRADLE_FLOOR_VERSION)`, exactly like
+ *    pins `.withGradleVersion(ANDROID_GRADLE_FLOOR_VERSION)`, exactly like
  *    [GradleFloorFunctionalTest] already does for the non-Android plugin --
  *    this suite is deliberately a floor-only exercise, not a "whatever's on
  *    this machine" one.
@@ -85,7 +85,7 @@ class AndroidWiringFunctionalTest {
         GradleRunner.create()
             .withProjectDir(projectDir.toFile())
             .withPluginClasspath()
-            .withGradleVersion(GRADLE_FLOOR_VERSION)
+            .withGradleVersion(ANDROID_GRADLE_FLOOR_VERSION)
             .withArguments(*args)
             .forwardOutput()
 

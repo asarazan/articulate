@@ -12,12 +12,12 @@ plugins {
 
 android {
     namespace = "net.sarazan.articulate.sample.androidApp"
-    compileSdk = 34
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "net.sarazan.articulate.sample.androidApp"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 37
     }
 
     compileOptions {

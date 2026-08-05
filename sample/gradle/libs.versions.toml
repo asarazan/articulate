@@ -13,7 +13,7 @@
 # SampleCompositeBuildFunctionalTest exists to pin. Do NOT consolidate these
 # into a root `plugins { ... apply false }` block to tidy them up.
 [versions]
-agp = "8.5.2"
+agp = "9.1.0"
 kotlin = "2.4.10"
 
 [plugins]

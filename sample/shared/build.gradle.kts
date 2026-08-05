@@ -19,7 +19,7 @@ kotlin {
 
 android {
     namespace = "net.sarazan.articulate.sample.shared"
-    compileSdk = 34
+    compileSdk = 37
     defaultConfig {
         minSdk = 24
     }
