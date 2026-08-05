@@ -1,8 +1,8 @@
 package net.sarazan.articulate.gradle
 
 import net.sarazan.articulate.core.convert.MarkupPolicy
-import net.sarazan.articulate.gradle.tasks.GenerateAndroidResTask
 import net.sarazan.articulate.gradle.tasks.GenerateXcstringsTask
+import net.sarazan.articulate.gradle.tasks.ValidateStringsTask
 import net.sarazan.articulate.gradle.tasks.VerifyStringsTask
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
@@ -16,7 +16,7 @@ internal const val ARTICULATE_TASK_GROUP = "articulate"
  * `net.sarazan.articulate` (PLAN.md §4.2/D10). Applied to the module that
  * owns the strings source tree (conventionally `:i18n`). Owns source
  * discovery, the `articulate { }` extension, and all four tasks:
- * [GenerateAndroidResTask], [GenerateXcstringsTask], the `generateStrings`
+ * [ValidateStringsTask], [GenerateXcstringsTask], the `generateStrings`
  * aggregate, and [VerifyStringsTask].
  *
  * No AGP on this plugin's classpath (D10): a KMP-only or non-Android consumer
@@ -87,43 +87,42 @@ class ArticulatePlugin : Plugin<Project> {
             }
         }
 
-        val generateAndroidRes = project.tasks.register("generateAndroidRes", GenerateAndroidResTask::class.java) { task ->
+        // PLAN.md §4.5b: GenerateAndroidResTask is gone -- its own KDoc
+        // recorded the verified premise that it was `copyTo`, nothing more,
+        // because the strings source tree (values*/strings.xml) is *already*
+        // valid Android resource layout. validateStrings replaces it as a
+        // pure correctness gate: same AndroidToXcstringsConverter.convert
+        // pipeline, same diagnostics, no output, no copy.
+        val validateStrings = project.tasks.register("validateStrings", ValidateStringsTask::class.java) { task ->
             task.group = ARTICULATE_TASK_GROUP
-            // §4.4/§4.5 (CORRECTED 2026-08-01 for the cross-project redesign):
-            // this task's own output always lands at the convention below now
-            // -- net.sarazan.articulate.android no longer wires AGP directly
-            // onto this task's androidResDir; it consumes this module's
-            // generated tree via articulateAndroidResElements instead (see
-            // below) and materializes its OWN copy through a task it
-            // registers itself, which is what AGP actually relocates.
-            task.description = "Regenerates the disposable per-locale Android values*/strings.xml tree at " +
-                "build/generated/i18n/res. Consumed by net.sarazan.articulate.android (if applied elsewhere) " +
-                "via the articulateAndroidResElements configuration, not by wiring this task's output directly."
+            task.description = "Parses and validates the strings source tree exactly as generateXcstrings would, " +
+                "with no output of its own -- the gate net.sarazan.articulate.android's consumable configuration " +
+                "runs via builtBy before a real build merges the source tree into Android resources."
             task.stringsDir.set(extension.stringsDir)
             task.sourceLanguage.set(extension.sourceLanguage)
             task.localeOverrides.set(extension.localeOverrides)
             task.warningsAsErrors.set(extension.warningsAsErrors)
-            task.androidResDir.set(project.layout.buildDirectory.dir("generated/i18n/res"))
         }
 
-        // PLAN.md §4.5/§13 (release-blocking redesign): expose the generated
-        // Android res tree as a **consumable** configuration rather than
-        // requiring a consumer to reach into this project's task container.
-        // net.sarazan.articulate.android resolves this from the app module
-        // via an ordinary project dependency -- dependency-graph resolution,
-        // not project-container access, so it survives isolated projects and
-        // carries the task dependency on generateAndroidRes implicitly (via
-        // `builtBy` below), with no `dependsOn` needed anywhere. See
-        // ArticulateAndroidResSharing.kt for why this configuration and its
-        // attribute are safe to reference identically from both plugin
-        // classes despite usually running in different plugin classloaders.
+        // PLAN.md §4.5b (supersedes §4.5/§13's generated-output artifact):
+        // the consumable configuration now carries the SOURCE directory
+        // itself, not a task's generated output. The files are always on
+        // disk, so a consumer resolving this configuration merely for a
+        // *path* (e.g. an IDE model at sync) needs nothing executed --
+        // `builtBy(validateStrings)` only matters when a real task in the
+        // consuming build's task graph declares this configuration as an
+        // input, which is what makes resolving it *for a build* run
+        // validation first. See ArticulateAndroidResSharing.kt for why this
+        // configuration and its attribute are safe to reference identically
+        // from both plugin classes despite usually running in different
+        // plugin classloaders.
         val articulateAndroidResElements = project.configurations.consumable(
             ARTICULATE_ANDROID_RES_ELEMENTS_CONFIGURATION,
         ) { config ->
             config.attributes.attribute(ARTICULATE_ANDROID_RES_ATTRIBUTE, ARTICULATE_ANDROID_RES_ATTRIBUTE_VALUE)
         }
-        project.artifacts.add(articulateAndroidResElements.name, generateAndroidRes.flatMap { it.androidResDir }) { artifact ->
-            artifact.builtBy(generateAndroidRes)
+        project.artifacts.add(articulateAndroidResElements.name, extension.stringsDir) { artifact ->
+            artifact.builtBy(validateStrings)
         }
 
         val generateXcstrings = project.tasks.register("generateXcstrings", GenerateXcstringsTask::class.java) { task ->
@@ -136,14 +135,17 @@ class ArticulatePlugin : Plugin<Project> {
             task.xcstringsFile.set(extension.ios.catalog)
         }
 
-        // PLAN.md §4.4: a lifecycle task with no outputs of its own,
-        // dependsOn-ing both generate tasks. Keeps the name `generateStrings`
-        // because that's the string already baked into verifyStrings' own
-        // failure message and the CI recipe.
+        // PLAN.md §4.4/§4.5b: a lifecycle task with no outputs of its own.
+        // Keeps the name `generateStrings` because that's the string already
+        // baked into verifyStrings' own failure message and the CI recipe --
+        // even though there is no longer an Android res tree to generate,
+        // `./gradlew generateStrings` remains the one command that
+        // regenerates the committed catalog *and* validates the Android path.
         project.tasks.register("generateStrings") { task ->
             task.group = ARTICULATE_TASK_GROUP
-            task.description = "Aggregate: regenerates both the Android res tree and the committed .xcstrings catalog."
-            task.dependsOn(generateAndroidRes, generateXcstrings)
+            task.description = "Aggregate: regenerates the committed .xcstrings catalog and validates the strings " +
+                "source tree for the Android path."
+            task.dependsOn(generateXcstrings, validateStrings)
         }
 
         project.tasks.register("verifyStrings", VerifyStringsTask::class.java) { task ->

@@ -19,10 +19,12 @@ import org.gradle.api.tasks.TaskAction
 
 /**
  * PLAN.md §4.4: regenerates the *committed* `.xcstrings` catalog from the
- * strings source tree. Unlike [GenerateAndroidResTask]'s output, this file is
- * checked into the repo (§4.4 "Why one output is committed and the other
- * isn't" -- Xcode sits outside Gradle's build graph, so the catalog must
- * already be on disk when a developer hits Cmd+B).
+ * strings source tree. Unlike the Android path -- where, since §4.5b, the
+ * strings source tree itself doubles as the Android resource output, so
+ * there is no separate generated file at all -- this file is checked into
+ * the repo (§4.4 "Why one output is committed and the other isn't" --
+ * Xcode sits outside Gradle's build graph, so the catalog must already be
+ * on disk when a developer hits Cmd+B).
  *
  * Byte-deterministic via [XcstringsWriter] and the same canonical rules
  * milestone 1 established: re-running without a source change reproduces

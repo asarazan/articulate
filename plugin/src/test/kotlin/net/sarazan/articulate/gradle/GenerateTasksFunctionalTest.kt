@@ -16,7 +16,7 @@ import java.nio.file.Path
 
 /**
  * PLAN.md §4.8: task wiring, up-to-dateness, and `warningsAsErrors`
- * behavior for `generateAndroidRes`, `generateXcstrings`, and the
+ * behavior for `validateStrings`, `generateXcstrings`, and the
  * `generateStrings` aggregate. Runs under the *building* Gradle (9.5.0); the
  * floor Gradle (8.7) is exercised separately by [GradleFloorFunctionalTest].
  *
@@ -37,10 +37,14 @@ class GenerateTasksFunctionalTest {
     }
 
     @Test
-    fun `generateStrings aggregate invokes both generate tasks and produces both outputs`() {
+    fun `generateStrings aggregate invokes generateXcstrings and validateStrings and produces the catalog`() {
+        // PLAN.md §4.5b: GenerateAndroidResTask (and its build/generated/i18n/res
+        // copy) is deleted -- the strings source tree IS already valid Android
+        // resource layout, so there is nothing left to generate for the
+        // Android path, only validateStrings' gate to run.
         val result = runner(projectDir, "generateStrings").build()
 
-        assertEquals(TaskOutcome.SUCCESS, result.task(":generateAndroidRes")!!.outcome)
+        assertEquals(TaskOutcome.SUCCESS, result.task(":validateStrings")!!.outcome)
         assertEquals(TaskOutcome.SUCCESS, result.task(":generateXcstrings")!!.outcome)
         assertEquals(TaskOutcome.SUCCESS, result.task(":generateStrings")!!.outcome)
 
@@ -50,24 +54,32 @@ class GenerateTasksFunctionalTest {
         assertTrue(catalogText.contains("\"hello\""), "catalog should contain the 'hello' key:\n$catalogText")
         assertTrue(catalogText.contains("\"sourceLanguage\" : \"en\""), "catalog should declare sourceLanguage en:\n$catalogText")
 
-        val androidValues = File(projectDir.toFile(), "build/generated/i18n/res/values/strings.xml")
-        val androidValuesDe = File(projectDir.toFile(), "build/generated/i18n/res/values-de/strings.xml")
-        assertTrue(androidValues.isFile, "expected generated Android res values/strings.xml")
-        assertTrue(androidValuesDe.isFile, "expected generated Android res values-de/strings.xml")
-        assertTrue(androidValues.readText().contains("hello"))
+        // §4.5b's verified premise, negative half: there is no more generated
+        // Android res tree anywhere under build/ for :i18n to own.
+        assertFalse(
+            File(projectDir.toFile(), "build/generated/i18n/res").exists(),
+            "GenerateAndroidResTask is deleted -- nothing should generate build/generated/i18n/res any more",
+        )
     }
 
     @Test
-    fun `second run with no source change reports both generate tasks UP-TO-DATE`() {
+    fun `second run with no source change reports generateXcstrings UP-TO-DATE and validateStrings re-running`() {
+        // validateStrings is deliberately @UntrackedTask (PLAN.md §4.5b/§5's
+        // "a gate must always re-verify" principle, same as verifyStrings) --
+        // it can never report UP-TO-DATE, so unlike the deleted
+        // GenerateAndroidResTask this is genuinely different behavior, not a
+        // regression: generateXcstrings (still CacheableTask) keeps its
+        // up-to-date semantics; validateStrings re-runs (and re-succeeds)
+        // every time it's scheduled.
         runner(projectDir, "generateStrings").build()
         val second = runner(projectDir, "generateStrings").build()
 
-        assertEquals(TaskOutcome.UP_TO_DATE, second.task(":generateAndroidRes")!!.outcome)
+        assertEquals(TaskOutcome.SUCCESS, second.task(":validateStrings")!!.outcome)
         assertEquals(TaskOutcome.UP_TO_DATE, second.task(":generateXcstrings")!!.outcome)
     }
 
     @Test
-    fun `editing one locale's strings xml re-runs both generate tasks`() {
+    fun `editing one locale's strings xml re-runs generateXcstrings and re-validates`() {
         runner(projectDir, "generateStrings").build()
 
         // Mutate-and-observe (per the process rules): this must be able to
@@ -84,7 +96,7 @@ class GenerateTasksFunctionalTest {
         )
 
         val second = runner(projectDir, "generateStrings").build()
-        assertEquals(TaskOutcome.SUCCESS, second.task(":generateAndroidRes")!!.outcome)
+        assertEquals(TaskOutcome.SUCCESS, second.task(":validateStrings")!!.outcome)
         assertEquals(TaskOutcome.SUCCESS, second.task(":generateXcstrings")!!.outcome)
 
         val catalogText = File(projectDir.toFile(), "ios/Shared.xcstrings").readText()
@@ -266,7 +278,7 @@ class GenerateTasksFunctionalTest {
      * localizable content must fail the build loudly, not get silently
      * dropped from the generated output. Exercised through the real Gradle
      * task graph (not just `core`'s corpus), so a regression that only
-     * shows up in how `GenerateAndroidResTask`/`GenerateXcstringsTask` wire
+     * shows up in how `ValidateStringsTask`/`GenerateXcstringsTask` wire
      * up `AndroidToXcstringsConverter` -- e.g. discovery reverting to its
      * own independent `File` filtering -- is caught here too.
      */
@@ -297,13 +309,22 @@ class GenerateTasksFunctionalTest {
     /**
      * The companion case: a presentation-only file (`colors.xml`, exactly
      * what a real `app/src/main/res/values/` directory routinely holds)
-     * must not break the build -- and, specifically for
-     * `generateAndroidRes`, must not leak into the generated output tree
-     * either. Only `strings.xml` is ever copied; `colors.xml` living
-     * alongside it in source is silently irrelevant to this task.
+     * must not break the build.
+     *
+     * **Rewritten for PLAN.md §4.5b.** The original version of this test
+     * asserted `colors.xml` was never copied into `generateAndroidRes`'s
+     * output tree -- meaningful when that task existed, but §4.5b deletes it
+     * entirely (the strings source tree is used as Android resource layout
+     * directly, nothing is copied anywhere by `:i18n` any more), so that
+     * specific claim is now vacuously true for every input and would no
+     * longer be a real test (the can't-fail-test rule). What's still
+     * genuinely testable and still the point of this fixture: a
+     * presentation-only companion file must not make `validateStrings` (the
+     * task that replaced `generateAndroidRes`'s validation role) error, and
+     * must not leak into the generated catalog as a spurious key.
      */
     @Test
-    fun `a presentation-only companion file like colors xml is ignored and never copied into the generated res tree`() {
+    fun `a presentation-only companion file like colors xml does not fail validateStrings or leak into the catalog`() {
         File(projectDir.toFile(), "src/main/strings/values/colors.xml").writeText(
             """
             <resources>
@@ -313,13 +334,14 @@ class GenerateTasksFunctionalTest {
         )
 
         val result = runner(projectDir, "generateStrings").build()
-        assertEquals(TaskOutcome.SUCCESS, result.task(":generateAndroidRes")!!.outcome)
+        assertEquals(TaskOutcome.SUCCESS, result.task(":validateStrings")!!.outcome)
+        assertEquals(TaskOutcome.SUCCESS, result.task(":generateXcstrings")!!.outcome)
 
-        val generatedValuesDir = File(projectDir.toFile(), "build/generated/i18n/res/values")
-        assertTrue(File(generatedValuesDir, "strings.xml").isFile, "expected strings.xml to still be generated")
+        val catalogText = File(projectDir.toFile(), "ios/Shared.xcstrings").readText()
+        assertTrue(catalogText.contains("\"hello\""), "expected the real string key to still be present:\n$catalogText")
         assertFalse(
-            File(generatedValuesDir, "colors.xml").exists(),
-            "colors.xml is presentation-only and must never be copied into the generated Android res tree",
+            catalogText.contains("colorPrimary"),
+            "colors.xml is presentation-only and must never leak into the generated catalog as a key",
         )
     }
 }

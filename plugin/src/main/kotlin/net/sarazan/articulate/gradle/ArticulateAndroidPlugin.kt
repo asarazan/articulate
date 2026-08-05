@@ -8,9 +8,9 @@ import org.gradle.api.Project
 /**
  * `net.sarazan.articulate.android` (PLAN.md §4.2/§4.5/D10). Applied to the
  * Android **app** module. Its only job is variant res wiring -- registering
- * the i18n-owning module's generated Android res tree (conventionally
- * `:i18n`, see [ArticulateAndroidExtension.i18nProject]) as a generated res
- * source directory for every variant.
+ * the i18n-owning module's strings source tree (conventionally `:i18n`, see
+ * [ArticulateAndroidExtension.i18nProject]) as a generated res source
+ * directory for every variant.
  *
  * AGP is `compileOnly` (D9, pinned to the 8.5.2 floor) and referenced only
  * from this file, never from [ArticulatePlugin] or anything in `:core` --
@@ -41,18 +41,77 @@ import org.gradle.api.Project
  * project directly. Instead it declares a **resolvable** configuration
  * ([ARTICULATE_ANDROID_RES_INCOMING_CONFIGURATION]) carrying
  * [ARTICULATE_ANDROID_RES_ATTRIBUTE], with an ordinary project dependency on
- * the i18n-owning project -- resolved lazily against
- * [ArticulateExtension]'s (via [ArticulatePlugin]) matching **consumable**
- * configuration. That is dependency-graph resolution, not project-container
- * access: permitted under isolated projects, and the task dependency on
- * `generateAndroidRes` is carried implicitly (via that configuration's
- * artifact `builtBy`), with no `evaluationDependsOn` or `dependsOn` anywhere
- * in this file. [ResolveArticulateAndroidResTask] -- a class this plugin
- * instance itself registers, in the app module's own plugin classloader --
- * materializes the resolved files into a directory `addGeneratedSourceDirectory`
- * then owns; see that class's KDoc for why the copy is necessary. No
- * `GenerateAndroidResTask` type, and no method reference against it, crosses
- * the classloader boundary any more.
+ * the i18n-owning project -- resolved against [ArticulatePlugin]'s matching
+ * **consumable** configuration. That is dependency-graph resolution, not
+ * project-container access: permitted under isolated projects, with no
+ * `evaluationDependsOn` or `dependsOn` anywhere in this file. No
+ * `GenerateAndroidResTask`/`ValidateStringsTask` type, and no method
+ * reference against either, ever crosses the classloader boundary.
+ *
+ * **§4.5b changed what this configuration carries, not how it is consumed
+ * here.** `:i18n`'s consumable configuration now publishes the strings
+ * *source* directory itself (`extension.stringsDir`), not a task's
+ * generated output (PLAN.md §4.5b point 1) -- because that source tree is
+ * already valid Android resource layout (`GenerateAndroidResTask` was
+ * verified to be `copyTo`, nothing more, before it was deleted). This
+ * plugin's own wiring is otherwise unchanged: [ResolveArticulateAndroidResTask]
+ * still materializes whatever this configuration resolves to into a
+ * directory `addGeneratedSourceDirectory` owns, and content-wise that is a
+ * copy of :i18n's real source tree now rather than a copy of a copy.
+ *
+ * **§4.5b's `addStaticSourceDirectory` alternative -- prototyped and
+ * abandoned, documented here because a wrong spec is more useful reported
+ * than silently routed around.** The design's whole premise ("the IDE
+ * resolves the path at sync with nothing executed... this is the whole
+ * fix") requires wiring `SourceDirectories.addStaticSourceDirectory(String)`
+ * at the i18n-owning project's real, always-on-disk source directory,
+ * instead of (or alongside) `addGeneratedSourceDirectory`. That API takes a
+ * plain `String`, not a `Provider`, so the absolute path has to be resolved
+ * *eagerly*, at configuration time -- and empirically, against a real AGP
+ * 8.5.2 build (`compileDebugJavaWithJavac` + `compileReleaseJavaWithJavac`,
+ * i.e. two variants), there turned out to be no point in the configuration
+ * phase where that eager resolution is both safe and effective:
+ *
+ *  - Resolved eagerly right after registering the resolvable configuration
+ *    above (still inside `pluginManager.withPlugin("com.android.application")`'s
+ *    callback, which runs *synchronously nested* inside AGP's own plugin
+ *    application, before this module's `android { }` block has even run):
+ *    the exception aborts script evaluation mid-way, before `compileSdk` is
+ *    set, producing a confusing secondary "compileSdkVersion is not
+ *    specified" failure alongside the real one.
+ *  - Resolved inside `androidComponents.onVariants { }` (fixes the above --
+ *    fires only once this module's whole DSL is finalized): fails
+ *    differently, `Cannot create variant 'android-manifest-metadata' after
+ *    dependency configuration ':app:debugApiElements' has been resolved`.
+ *    AGP creates each variant's own configurations progressively while
+ *    processing that variant's `onVariants` callbacks; resolving *any*
+ *    configuration in this project -- including our own, unrelated one --
+ *    trips Gradle's rule against creating further configurations in that
+ *    project afterward, and with two variants requested, the *next*
+ *    variant's configuration creation is what breaks.
+ *  - Resolved from `project.afterEvaluate { }` (registered after
+ *    `onVariants`, so by construction after every variant has already been
+ *    processed -- confirmed this avoids the above): no exception, but the
+ *    directory never reaches the merge. Verified directly, not inferred:
+ *    `:app/build/intermediates/source_set_path_map/debug/mapDebugSourceSetPaths`
+ *    -- the file AGP itself writes recording each variant's resolved res
+ *    source directories -- never contains it, listing only
+ *    `generated/res/{pngs,resValues}`, this task's own (see below)
+ *    `generated/res/resolveArticulateAndroidRes`, `packageDebugResources`'s
+ *    intermediate dirs, and `src/{debug,main}/res`. AGP snapshots each
+ *    variant's resource source-directory list before `afterEvaluate`
+ *    fires, so anything added there is silently too late -- not merely
+ *    unresolved, structurally invisible to the merge.
+ *
+ * The safe-to-resolve window (after all variants) and the effective-to-add
+ * window (during each variant's own `onVariants`, before any configuration
+ * in the project has been resolved) do not overlap under AGP 8.5.2. That
+ * makes `addStaticSourceDirectory`, fed from this configuration, a dead end
+ * as specified -- not a bug in this implementation to keep working around.
+ * Concretely, this means the pre-existing IDE-visibility defect PLAN.md §4.5
+ * already records ("IDE visibility of generated Android res -- OPEN
+ * DEFECT") is **not** fixed by this change; `R.string.your_key` still shows
+ * red in Studio until a build actually runs `resolveArticulateAndroidRes`.
  */
 class ArticulateAndroidPlugin : Plugin<Project> {
 
@@ -95,7 +154,7 @@ class ArticulateAndroidPlugin : Plugin<Project> {
                 ResolveArticulateAndroidResTask::class.java,
             ) { task ->
                 task.group = ARTICULATE_TASK_GROUP
-                task.description = "Materializes the Android res tree generated by the i18n-owning module " +
+                task.description = "Materializes the strings source tree published by the i18n-owning module " +
                     "(resolved via $ARTICULATE_ANDROID_RES_INCOMING_CONFIGURATION, not a cross-project task " +
                     "lookup -- PLAN.md §4.5/§13) for AGP to merge into this app module's variants."
                 // The Configuration object itself, not `.files`/`.resolve()`
@@ -113,7 +172,12 @@ class ArticulateAndroidPlugin : Plugin<Project> {
                 // net.sarazan.articulate) still surface loudly -- as Gradle's
                 // own "Could not resolve..." diagnostics, which already name
                 // the project path and the missing attribute/variant -- just
-                // not wrapped in Articulate's own message text.
+                // not wrapped in Articulate's own message text. This is also
+                // what carries the implicit dependency on :i18n's
+                // validateStrings (PLAN.md §4.5b point 2) into a real build:
+                // whenever AGP schedules this task, Gradle inserts
+                // validateStrings first, via the configuration artifact's
+                // builtBy.
                 task.resolvedRes.from(articulateAndroidResIn)
                 task.outputDir.convention(project.layout.buildDirectory.dir("generated/articulate/res"))
             }

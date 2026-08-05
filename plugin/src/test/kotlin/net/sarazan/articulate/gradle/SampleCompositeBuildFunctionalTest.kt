@@ -88,7 +88,8 @@ class SampleCompositeBuildFunctionalTest {
             .build()
 
         assertEquals(TaskOutcome.SUCCESS, result.task(":androidApp:compileDebugJavaWithJavac")!!.outcome)
-        assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:generateAndroidRes")!!.outcome)
+        // PLAN.md §4.5b: GenerateAndroidResTask is deleted -- validateStrings is the gate.
+        assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:validateStrings")!!.outcome)
         assertEquals(TaskOutcome.SUCCESS, result.task(":androidApp:resolveArticulateAndroidRes")!!.outcome)
     }
 

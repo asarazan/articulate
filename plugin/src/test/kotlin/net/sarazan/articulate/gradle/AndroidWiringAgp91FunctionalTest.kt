@@ -90,7 +90,8 @@ class AndroidWiringAgp91FunctionalTest {
 
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:compileDebugJavaWithJavac")!!.outcome)
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:compileReleaseJavaWithJavac")!!.outcome)
-        assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:generateAndroidRes")!!.outcome)
+        // PLAN.md §4.5b: GenerateAndroidResTask is deleted -- validateStrings is the gate.
+        assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:validateStrings")!!.outcome)
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:resolveArticulateAndroidRes")!!.outcome)
         // Marker.java (written by writeAndroidAppModule) references
         // R.string.hello -- javac succeeding is proof AGP 9.1's resource
@@ -120,23 +121,23 @@ class AndroidWiringAgp91FunctionalTest {
                 "AGP 8.5.2 floor cell now does (PLAN.md §4.5/§13 redesign closed the prior divergence): $relocated",
         )
 
-        // :i18n's own generateAndroidRes still materializes at its own
-        // convention location too -- it is the artifact the consumable
-        // configuration publishes, not the task AGP wires directly any
-        // more, so this is expected on both cells (see the identical
-        // assertion in AndroidWiringFunctionalTest).
-        val i18nOwnCopy = File(projectDir.toFile(), "i18n/build/generated/i18n/res/values/strings.xml")
-        assertTrue(i18nOwnCopy.isFile, "expected :i18n's own generateAndroidRes to still materialize at its own convention location: $i18nOwnCopy")
+        // PLAN.md §4.5b: GenerateAndroidResTask is deleted -- :i18n no longer
+        // materializes any Android res copy of its own on either AGP cell
+        // (see the identical assertion in AndroidWiringFunctionalTest).
+        assertFalse(
+            File(projectDir.toFile(), "i18n/build/generated/i18n/res").exists(),
+            "GenerateAndroidResTask is deleted -- :i18n must not generate its own Android res copy any more",
+        )
     }
 
     @Test
-    fun `AGP 9 1 -- articulateAndroidResIncoming resolves generateAndroidRes's output from a sibling module`() {
+    fun `AGP 9 1 -- articulateAndroidResIncoming resolves validateStrings's gate from a sibling module`() {
         writeTwoModuleFixture()
 
         val result = agp91Runner(":app:resolveArticulateAndroidRes").build()
 
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:resolveArticulateAndroidRes")!!.outcome)
-        assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:generateAndroidRes")!!.outcome)
+        assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:validateStrings")!!.outcome)
     }
 
     @Test

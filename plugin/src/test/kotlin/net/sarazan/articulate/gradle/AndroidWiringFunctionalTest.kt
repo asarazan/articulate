@@ -126,7 +126,10 @@ class AndroidWiringFunctionalTest {
         // Per-variant: both debug and release wired, not just whichever is default.
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:compileDebugJavaWithJavac")!!.outcome)
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:compileReleaseJavaWithJavac")!!.outcome)
-        assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:generateAndroidRes")!!.outcome)
+        // PLAN.md §4.5b: GenerateAndroidResTask is deleted -- :i18n's gate is
+        // now validateStrings, forced into this real build by resolveArticulateAndroidRes's
+        // @InputFiles on the resolvable configuration (builtBy).
+        assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:validateStrings")!!.outcome)
         // compileDebugJavaWithJavac succeeding compiles Marker.java, which
         // references R.string.hello -- this only resolves if AGP actually
         // merged the wired directory into the variant's resources and
@@ -172,19 +175,15 @@ class AndroidWiringFunctionalTest {
         val localeGenerated = File(projectDir.toFile(), "app/build/generated/res/resolveArticulateAndroidRes/values-de/strings.xml")
         assertTrue(localeGenerated.isFile, "per-locale generated res must be relocated alongside the default")
 
-        // Genuinely different from the pre-redesign invariant (§4.5/§13):
-        // :i18n's own generateAndroidRes task now ALWAYS materializes at its
-        // own convention location too, because nothing overrides its
-        // androidResDir property any more -- only the *consumer's*
-        // resolveArticulateAndroidRes gets AGP-relocated. :i18n's copy is the
-        // artifact the consumable configuration publishes; :app's is a
-        // materialized copy of what got resolved from it. Both exist
-        // simultaneously now, which is expected, not stale.
-        val i18nOwnCopy = File(i18nDir, "build/generated/i18n/res/values/strings.xml")
-        assertTrue(
-            i18nOwnCopy.isFile,
-            "expected :i18n's own generateAndroidRes to still materialize at its own convention location, " +
-                "since it is no longer the task AGP wires directly: $i18nOwnCopy",
+        // PLAN.md §4.5b, genuinely different from the pre-4.5b invariant:
+        // :i18n no longer generates ANY Android res copy of its own --
+        // GenerateAndroidResTask is deleted, and the consumable
+        // configuration now publishes :i18n's real source directory
+        // directly. There is nothing under :i18n/build for the Android path
+        // at all any more.
+        assertFalse(
+            File(i18nDir, "build/generated/i18n/res").exists(),
+            "GenerateAndroidResTask is deleted -- :i18n must not generate its own Android res copy any more",
         )
     }
 
@@ -204,7 +203,9 @@ class AndroidWiringFunctionalTest {
         val result = androidRunner(":app:resolveArticulateAndroidRes").build()
 
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:resolveArticulateAndroidRes")!!.outcome)
-        assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:generateAndroidRes")!!.outcome)
+        // PLAN.md §4.5b: GenerateAndroidResTask is deleted -- validateStrings
+        // is the gate resolveArticulateAndroidRes's @InputFiles forces in.
+        assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:validateStrings")!!.outcome)
 
         // AGP relocates resolveArticulateAndroidRes's output as soon as it
         // creates variants during project configuration (§4.4/§4.5), which
@@ -321,7 +322,8 @@ class AndroidWiringFunctionalTest {
         val result = androidRunner(":app:resolveArticulateAndroidRes").build()
 
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:resolveArticulateAndroidRes")!!.outcome)
-        assertEquals(TaskOutcome.SUCCESS, result.task(":app:generateAndroidRes")!!.outcome)
+        // PLAN.md §4.5b: GenerateAndroidResTask is deleted -- validateStrings is the gate.
+        assertEquals(TaskOutcome.SUCCESS, result.task(":app:validateStrings")!!.outcome)
         assertFalse(result.output.contains("CircularReferenceException"))
         val resolved = File(appDir, "build/generated/res/resolveArticulateAndroidRes/values/strings.xml")
         assertTrue(resolved.isFile, "expected the self-applied module's own generated res to resolve: $resolved")
