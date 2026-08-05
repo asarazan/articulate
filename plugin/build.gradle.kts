@@ -16,8 +16,9 @@ plugins {
 }
 
 // Publishing coordinates. 0.1.0 deliberately, not 1.0.0: `markupPolicy` accepts
-// values whose implementations are deferred (D4) and the isolated-projects
-// incompatibility (PLAN.md §13) is a tracked redesign. 0.x is the honest signal.
+// STRIP and VERBATIM in the DSL but only ERROR is implemented (D4), the M6
+// Swift key-parity lint is not built, and generated common-layer tokens are
+// scoped but not built (PLAN.md §14 amendment). 0.x is the honest signal.
 // Set per-module rather than via allprojects{} -- the root script forbids
 // cross-project configuration precisely because it breaks project isolation.
 group = "net.sarazan.articulate"
@@ -84,6 +85,7 @@ kotlin {
 // exists purely to feed `pluginUnderTestMetadata` below, for TestKit.
 val agpTestKitClasspath: Configuration by configurations.creating {
     isCanBeConsumed = false
+    isCanBeResolved = true
 }
 
 // Task 3 / D9's upper matrix cell (PLAN.md §E2): AGP 9.1, never previously
@@ -98,6 +100,7 @@ val agpTestKitClasspath: Configuration by configurations.creating {
 // AGP 8.5.2 via agpTestKitClasspath/pluginUnderTestMetadata, the floor cell.
 val agp91TestKitClasspath: Configuration by configurations.creating {
     isCanBeConsumed = false
+    isCanBeResolved = true
 }
 
 // `core` is BUNDLED into this jar rather than published as its own artifact.
@@ -176,17 +179,6 @@ gradlePlugin {
     testSourceSets(sourceSets["test"])
 }
 
-// `PluginUnderTestMetadata.pluginClasspath` defaults to `sourceSets.main.runtimeClasspath`
-// alone, which never includes `compileOnly(libs.android.gradle.plugin)` --
-// `compileOnly` is deliberately excluded from every runtime classpath by
-// Gradle. Without this, ArticulateAndroidPlugin's compiled reference to
-// AGP's `ApplicationAndroidComponentsExtension` throws `NoClassDefFoundError`
-// inside any TestKit fixture built with `withPluginClasspath()`, since AGP's
-// classes are simply absent from the injected classpath -- not merely in a
-// different classloader. `.from()` on a `ConfigurableFileCollection` appends
-// rather than replaces, so this adds `agpTestKitClasspath` (AGP + its
-// transitive deps) alongside the existing default, without touching what
-// gets published (see `agpTestKitClasspath`'s own comment, above).
 // Unpack core's classes into this jar. `zipTree` inside a provider keeps it
 // lazy; `bundledCore` is non-transitive so only core itself is unpacked, never
 // the Kotlin stdlib (which Gradle supplies to plugins anyway).
@@ -195,9 +187,19 @@ tasks.jar {
 }
 
 // `pluginUnderTestMetadata` builds the classpath TestKit fixtures resolve
-// `plugins { id(...) }` against, and defaults to `sourceSets.main.runtimeClasspath`
-// -- which no longer contains core now that it is `compileOnly`. Add both core
-// and AGP explicitly, or every functional test fails with NoClassDefFoundError.
+// `plugins { id(...) }` against. `PluginUnderTestMetadata.pluginClasspath`
+// defaults to `sourceSets.main.runtimeClasspath` alone, which no longer
+// contains core (now `compileOnly`) or AGP (`compileOnly(libs.android.gradle.plugin)`
+// -- `compileOnly` is deliberately excluded from every runtime classpath by
+// Gradle). Without both added explicitly, ArticulateAndroidPlugin's compiled
+// reference to AGP's `ApplicationAndroidComponentsExtension` throws
+// `NoClassDefFoundError` inside any TestKit fixture built with
+// `withPluginClasspath()`, since the needed classes are simply absent from
+// the injected classpath -- not merely in a different classloader. `.from()`
+// on a `ConfigurableFileCollection` appends rather than replaces, so this adds
+// `agpTestKitClasspath` (AGP + its transitive deps) and `bundledCore`
+// alongside the existing default, without touching what gets published (see
+// `agpTestKitClasspath`'s own comment, above).
 tasks.named<PluginUnderTestMetadata>("pluginUnderTestMetadata") {
     pluginClasspath.from(agpTestKitClasspath, bundledCore)
 }
@@ -217,8 +219,13 @@ val agp91PluginUnderTestMetadata = tasks.register<PluginUnderTestMetadata>("agp9
 tasks.test {
     useJUnitPlatform()
     dependsOn(agp91PluginUnderTestMetadata)
+    // Lazy (flatMap on the task's own Provider<RegularFile>), not `.get()` on
+    // agp91PluginUnderTestMetadata directly -- the latter forces the task
+    // object at configuration time, which defeats configuration avoidance
+    // even though `dependsOn` above is already correctly lazy.
     systemProperty(
         "articulate.agp91PluginUnderTestMetadata",
-        agp91PluginUnderTestMetadata.get().outputDirectory.file("plugin-under-test-metadata.properties").get().asFile.absolutePath,
+        agp91PluginUnderTestMetadata.flatMap { it.outputDirectory.file("plugin-under-test-metadata.properties") }
+            .get().asFile.absolutePath,
     )
 }
