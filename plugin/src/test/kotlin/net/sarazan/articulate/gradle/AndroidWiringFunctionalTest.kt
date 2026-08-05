@@ -117,6 +117,61 @@ class AndroidWiringFunctionalTest {
         return i18nDir
     }
 
+    /**
+     * PLAN.md §4.5b made [ResolveArticulateAndroidResTask]'s copy **selective**
+     * -- only `strings.xml` under each locale directory -- and that selectivity
+     * is load-bearing in a way nothing else covered until this test.
+     *
+     * Before §4.5b the task copied a tree `generateAndroidRes` had already
+     * filtered, so a blanket `copyRecursively` was harmless. §4.5b feeds it the
+     * consumer's **raw source directory** instead, and §4.3 explicitly blesses
+     * pointing `stringsDir` at a real `app/src/main/res` -- which routinely holds
+     * `colors.xml`, `dimens.xml`, `styles.xml`, plus editor litter like
+     * `.DS_Store`. A blanket copy drags all of it into the app's generated res,
+     * where a `colors.xml` carrying a name the app also defines is a duplicate
+     * resource: a build failure at best, a silent override at worst.
+     *
+     * The regression this pins is therefore invisible to every other test --
+     * they all use a fixture containing nothing but `strings.xml`, so blanket
+     * and selective copying are indistinguishable. Mutation-proven: restoring
+     * `copyRecursively` fails this and nothing else.
+     */
+    @Test
+    fun `presentation files and editor litter beside strings xml are not copied into the app's generated res`() {
+        val i18nDir = writeTwoModuleFixture()
+        val values = File(i18nDir, "src/main/strings/values")
+        File(values, "colors.xml").writeText(
+            """
+            <resources>
+                <color name="colorPrimary">#FFFFFF</color>
+            </resources>
+            """.trimIndent(),
+        )
+        File(values, "dimens.xml").writeText(
+            """
+            <resources>
+                <dimen name="gutter">8dp</dimen>
+            </resources>
+            """.trimIndent(),
+        )
+        File(values, ".DS_Store").writeBytes(byteArrayOf(0, 0, 0, 1))
+
+        androidRunner(":app:resolveArticulateAndroidRes").build()
+
+        val generatedValues = File(projectDir.toFile(), "app/build/generated/res/resolveArticulateAndroidRes/values")
+        val copied = generatedValues.listFiles().orEmpty().map { it.name }.sorted()
+        assertTrue(
+            copied.contains("strings.xml"),
+            "guard: strings.xml must be copied, otherwise the assertions below pass for the wrong reason. Got: $copied",
+        )
+        assertEquals(
+            listOf("strings.xml"),
+            copied,
+            "only values*/strings.xml may reach the app's generated res -- anything else can collide with the " +
+                "app's own resources (PLAN.md §4.5b). Got: $copied",
+        )
+    }
+
     @Test
     fun `generated Android res is registered as a variant source directory and R string resolves it`() {
         val i18nDir = writeTwoModuleFixture()
