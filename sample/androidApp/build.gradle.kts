@@ -5,8 +5,8 @@
 // this module's plugin classloader carries our plugin's jars *plus* AGP's,
 // while :i18n's carries only ours.
 plugins {
-    id("com.android.application") version "8.5.2"
-    id("org.jetbrains.kotlin.android") version "2.4.10"
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
     id("net.sarazan.articulate.android") version "0.1.0"
 }
 

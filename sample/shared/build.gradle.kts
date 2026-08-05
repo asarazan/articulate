@@ -2,8 +2,8 @@
 // question (PLAN.md §14) -- not because Articulate itself requires it. See
 // the sample's own README.
 plugins {
-    id("org.jetbrains.kotlin.multiplatform") version "2.4.10"
-    id("com.android.library") version "8.5.2"
+    alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.android.library)
 }
 
 kotlin {

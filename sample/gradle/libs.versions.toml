@@ -1,0 +1,23 @@
+# Version catalog for the sample composite build ONLY -- separate from the
+# root build's gradle/libs.versions.toml, which pins the *plugin's* D9 floor.
+#
+# This exists so Android Studio's AGP Upgrade Assistant can find a version to
+# rewrite. Without it the Assistant walks up the composite build and edits the
+# ROOT catalog instead -- silently changing the plugin's compileOnly AGP floor
+# and the classpath AndroidWiringFunctionalTest resolves against.
+#
+# NOTE: each module still declares its own `plugins {}` block. That is
+# deliberate and load-bearing (PLAN.md §4.5/§13): it is Android Studio's
+# default template shape, it gives every module a distinct plugin classloader,
+# and it is the only layout that reproduces the cross-project bug
+# SampleCompositeBuildFunctionalTest exists to pin. Do NOT consolidate these
+# into a root `plugins { ... apply false }` block to tidy them up.
+[versions]
+agp = "8.5.2"
+kotlin = "2.4.10"
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
