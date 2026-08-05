@@ -90,19 +90,22 @@ internal object FunctionalTestSupport {
      *
      * Verified 2026-07-31 by printing
      * `com.android.builder.model.Version.ANDROID_GRADLE_PLUGIN_VERSION` from a
-     * live fixture: `8.5.2`, i.e. D9's floor. Re-verify by that route, never
-     * by reading this constant.
+     * live fixture: `8.5.2`, i.e. D9's floor at the time. REVISED 2026-08-03:
+     * D9's floor moved to AGP 9.1.0 (PLAN.md §E2), which is what this
+     * mechanism now supplies to every Android fixture -- both cells of the
+     * matrix run this same AGP version, see [ANDROID_GRADLE_FLOOR_VERSION].
+     * Re-verify by the same route, never by reading this constant.
      */
     const val AGP_VERSION = "9.1.0"
 
     /**
-     * The Gradle version paired with [AGP_VERSION] (D9's floor, §E2).
-     * AGP 8.5.2 is not verified against the *building* Gradle (9.5.0, this
-     * repo's wrapper) -- AGP's own compatibility table pairs 8.5.x with the
-     * Gradle 8.7-8.9 range, and Gradle 9 removed APIs old AGP releases still
-     * use. Every Android fixture in [AndroidWiringFunctionalTest] therefore
-     * runs via `.withGradleVersion(GRADLE_FLOOR_VERSION)`, exactly like
-     * [GradleFloorFunctionalTest] already does for the non-Android plugin.
+     * The Gradle floor for the **base** plugin (`net.sarazan.articulate`,
+     * no AGP on its classpath, D10). [GradleFloorFunctionalTest] pins this
+     * for the base plugin. AGP 8.5.x's own compatibility table historically
+     * paired with the Gradle 8.7-8.9 range -- true when D9's floor was
+     * 8.5.2 -- but that pairing no longer describes any Android fixture:
+     * since the 2026-08-03 revision (PLAN.md §E2), Android fixtures pin
+     * [ANDROID_GRADLE_FLOOR_VERSION] instead, not this constant.
      */
     const val GRADLE_FLOOR_VERSION = "8.7"
 
@@ -120,54 +123,15 @@ internal object FunctionalTestSupport {
      */
     const val ANDROID_GRADLE_FLOOR_VERSION = "9.3.1"
 
-    /** `compileSdk`/`targetSdk` for Android fixtures. 37 because AGP 9.1 is the floor now and only SDK 34/37 are installed. */
+    /**
+     * `compileSdk`/`targetSdk` for Android fixtures. 37 because AGP 9.1 is
+     * the floor now, only SDK 34/37 are installed, and -- since the
+     * 2026-08-03 revision put both matrix cells on the same AGP version --
+     * this one constant now serves both [AndroidWiringFunctionalTest] and
+     * [AndroidWiringGradleCurrentFunctionalTest]; there is no longer a
+     * separate AGP-9.1-cell constant.
+     */
     const val COMPILE_SDK = 37
-
-    /**
-     * Task 3 / D9's upper matrix cell (PLAN.md §E2): the AGP version
-     * `plugin/build.gradle.kts`'s `agp91TestKitClasspath` resolves. Unlike
-     * [AGP_VERSION], this one *is* the source of truth (there is no separate
-     * fixture-side pin to drift from it) -- [agp91PluginClasspath] reads the
-     * classpath that configuration produced directly.
-     */
-    const val AGP_91_VERSION = "9.1.0"
-
-    /** `compileSdk`/`targetSdk` for the AGP 9.1 cell -- the max it supports (table in the task brief, verified from Android's release notes). */
-    const val COMPILE_SDK_AGP_91 = 37
-
-    /**
-     * Reads the TestKit plugin classpath [AndroidWiringAgp91FunctionalTest]
-     * runs against -- AGP 9.1.0 instead of the [AGP_VERSION] floor every
-     * other functional test gets from the default,
-     * classpath-resource-based `GradleRunner.withPluginClasspath()`.
-     *
-     * `plugin/build.gradle.kts`'s `agp91PluginUnderTestMetadata` task (a
-     * second, independent `PluginUnderTestMetadata`) resolves
-     * `com.android.tools.build:gradle:9.1.0` into its own classpath and
-     * writes it to its own output file -- deliberately *not* added to any
-     * source set's resources, so it can never collide with the default
-     * `plugin-under-test-metadata.properties` on the `test` classpath (which
-     * is what makes the no-arg `.withPluginClasspath()` resolve to AGP
-     * 8.5.2 for every other test in this source set). That file's absolute
-     * path is handed to this JVM via the `articulate.agp91PluginUnderTestMetadata`
-     * system property, set by `tasks.test` in the build file; this function
-     * reads it, parses its `implementation-classpath` entry, and returns a
-     * classpath [AndroidWiringAgp91FunctionalTest] passes explicitly to
-     * `GradleRunner.withPluginClasspath(List<File>)`.
-     */
-    fun agp91PluginClasspath(): List<File> {
-        val propsPath = System.getProperty("articulate.agp91PluginUnderTestMetadata")
-            ?: error(
-                "system property articulate.agp91PluginUnderTestMetadata is not set -- " +
-                    "AndroidWiringAgp91FunctionalTest must run via `./gradlew :plugin:test` " +
-                    "(see the systemProperty wiring on tasks.test in plugin/build.gradle.kts), not directly.",
-            )
-        val propsFile = File(propsPath)
-        val props = java.util.Properties().apply { propsFile.inputStream().use { load(it) } }
-        val classpath = props.getProperty("implementation-classpath")
-            ?: error("expected key 'implementation-classpath' in $propsFile, found: ${props.keys}")
-        return classpath.split(File.pathSeparator).map(::File)
-    }
 
     /**
      * Locates a real Android SDK the way a developer's machine actually has

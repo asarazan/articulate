@@ -12,18 +12,19 @@ import org.gradle.api.Project
  * [ArticulateAndroidExtension.i18nProject]) as a generated res source
  * directory for every variant.
  *
- * AGP is `compileOnly` (D9, pinned to the 8.5.2 floor) and referenced only
+ * AGP is `compileOnly` (D9, pinned to the 9.1 floor) and referenced only
  * from this file, never from [ArticulatePlugin] or anything in `:core` --
  * D10's entire point is that a non-Android consumer of the base plugin never
  * pulls AGP onto its classpath.
  *
  * ---
  * **Verified against a real Android build** by [AndroidWiringFunctionalTest],
- * which runs AGP 8.5.2 on Gradle 8.7 (D9's floor, `compileSdk 34`) against an
- * installed SDK and compiles a Java source referencing `R.string.hello` --
- * proof the wired directory actually reached AGP's resource merge, not merely
- * that a task ran. Never write into a variant's checked-in `res` source set;
- * never use the legacy `sourceSets["main"].res.srcDir` (both settled, §4.5).
+ * which runs AGP 9.1 on Gradle 9.3.1 (D9's floor, REVISED 2026-08-03,
+ * `compileSdk 37`) against an installed SDK and compiles a Java source
+ * referencing `R.string.hello` -- proof the wired directory actually reached
+ * AGP's resource merge, not merely that a task ran. Never write into a
+ * variant's checked-in `res` source set; never use the legacy
+ * `sourceSets["main"].res.srcDir` (both settled, §4.5).
  *
  * **Cross-project mechanism, redesigned 2026-08-01 (PLAN.md §4.5/§13,
  * release-blocking).** The previous implementation resolved the producing

@@ -63,8 +63,9 @@ import java.io.File
  * confirmed directly by inspecting `mapDebugSourceSetPaths`'s output, which
  * never contained the statically-added directory no matter how late (short
  * of literally being ignored) the call was deferred. There is no timing
- * window in which both conditions hold under AGP 8.5.2 (the D9 floor this
- * plugin targets). This task's copy-based approach is therefore still the
+ * window in which both conditions hold under AGP 8.5.2 (the D9 floor at the
+ * time this was probed; the floor has since moved to AGP 9.1.0, PLAN.md
+ * §E2). This task's copy-based approach is therefore still the
  * mechanism that actually gets content into AGP's resource merge; it does
  * **not** fix the pre-existing IDE-visibility defect recorded in PLAN.md
  * §4.5 ("IDE visibility of generated Android res -- OPEN DEFECT") --

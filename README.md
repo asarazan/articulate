@@ -96,9 +96,8 @@ articulate {
 
 ## Requirements
 
-- Gradle 8.7+ (tested to 9.5)
-- AGP 8.5.2+ for the Android plugin (tested to 9.1)
-- JDK 17+
+- Base plugin (`net.sarazan.articulate`): Gradle 8.7+, JDK 17+
+- Android companion plugin (`net.sarazan.articulate.android`): AGP 9.1+, Gradle 9.3.1+
 
 Configuration-cache compatible. Kotlin Multiplatform is **not** required — see
 [`sample/`](sample/), whose README says exactly where KMP is and isn't load-bearing.

@@ -358,7 +358,7 @@ Read at `ListenUpApp/ListenUp`, `tools/build-logic/convention/src/main/kotlin/li
 ### 4.2 Plugin structure (D10 — two IDs)
 
 - **`net.sarazan.articulate`** — applied to `:i18n`. Owns source discovery, `generateStrings`, `verifyStrings`, the extension, and the optional `commonMain` keys object. **No AGP on its classpath.**
-- **`net.sarazan.articulate.android`** — applied to the Android **app** module. Its only job is variant res wiring. Depends on AGP (`compileOnly`, pinned to the D9 floor of AGP 8.5.2 so we cannot accidentally use a newer API).
+- **`net.sarazan.articulate.android`** — applied to the Android **app** module. Its only job is variant res wiring. Depends on AGP (`compileOnly`, pinned to the D9 floor of AGP 9.1.0 so we cannot accidentally use a newer API).
 
 ### 4.3 Source contract
 
@@ -820,7 +820,7 @@ Blocking first; later items can wait until their milestone starts.
 
 **Milestones 2 and 3 are both fully unblocked.** §2.2–§2.7 and §3.1 carry the merged, research-corrected rules, with `docs/CONVERSIONS.md` as the cited spec of record.
 
-- ✅ **D9 — Gradle/AGP floor** (§E2): **AGP 8.5.2 / Gradle 8.7**, two-cell matrix {floor, AGP 9.1}. Revised down from the original AGP 8.1 proposal because KGP 2.4.10 cannot build a sample below 8.5.2 — an 8.1 floor would have advertised an untestable configuration. *Decided 2026-07-30.*
+- ✅ **D9 — Gradle/AGP floor** (§E2): **AGP 8.5.2 / Gradle 8.7**, two-cell matrix {floor, AGP 9.1}. Revised down from the original AGP 8.1 proposal because KGP 2.4.10 cannot build a sample below 8.5.2 — an 8.1 floor would have advertised an untestable configuration. *Decided 2026-07-30.* REVISED 2026-08-03 to AGP 9.1.0/Gradle 9.3.1, see §E2.
 - ✅ **D10 — Plugin ID / DSL shape** (§E4): **two plugin IDs**, so only the `.android` plugin carries AGP on its classpath and non-Android consumers never pull it. Plus `warningsAsErrors`, defaulting to `false`. *Decided 2026-07-30.*
 
 - ✅ **D7 — v0 scope** (§8): **milestones 1–5** — generation *and* the drift gate; Swift lint is v0.1. Plus: the `STRIP` span-text gap is implemented when `STRIP` ships, not pre-built, since v0 implements only `ERROR` where the gap is unreachable. *Decided 2026-07-30.*

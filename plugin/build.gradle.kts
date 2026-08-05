@@ -3,7 +3,7 @@
 // extension) and `net.sarazan.articulate.android` (AGP variant res wiring
 // only). Thin — delegates all real logic to `core`.
 //
-// AGP is `compileOnly` and pinned to the D9 floor (8.5.2) precisely so this
+// AGP is `compileOnly` and pinned to the D9 floor (9.1.0) precisely so this
 // module cannot accidentally compile against a newer AGP API that a
 // floor-Gradle/floor-AGP consumer's runtime wouldn't have — see
 // GradleFloorFunctionalTest, which exercises the actual floor via TestKit.
@@ -88,20 +88,15 @@ val agpTestKitClasspath: Configuration by configurations.creating {
     isCanBeResolved = true
 }
 
-// Task 3 / D9's upper matrix cell (PLAN.md §E2): AGP 9.1, never previously
-// exercised anywhere. Deliberately a *separate* configuration from
-// agpTestKitClasspath above, not an additional dependency on it -- putting
-// both AGP 8.5.2 and 9.1.0 on the same classpath would load conflicting
-// copies of the same classes with an arbitrary winner. AndroidWiringAgp91FunctionalTest
-// builds its own explicit TestKit plugin classpath from this at runtime
-// (see agp91PluginUnderTestMetadata below) instead of using the default,
-// classpath-resource-based GradleRunner.withPluginClasspath() that every
-// other functional test relies on -- that default is permanently pinned to
-// AGP 8.5.2 via agpTestKitClasspath/pluginUnderTestMetadata, the floor cell.
-val agp91TestKitClasspath: Configuration by configurations.creating {
-    isCanBeConsumed = false
-    isCanBeResolved = true
-}
+// There used to be a second, parallel TestKit classpath configuration here
+// (PLAN.md §E2/D9, Task 3): the matrix's two cells ran different AGP
+// versions (8.5.2 floor vs 9.1.0 upper), so each needed its own plugin
+// classpath. REVISED 2026-08-03: the floor moved to AGP 9.1.0, so both
+// cells now run the *same* AGP -- the matrix's real axis is Gradle version
+// (ANDROID_GRADLE_FLOOR_VERSION vs the wrapper), not AGP. With one AGP
+// version, the default `pluginUnderTestMetadata` below (which already
+// resolves `agpTestKitClasspath` = the catalog's 9.1.0) serves both cells,
+// and the duplicate classpath machinery had no remaining job. Deleted.
 
 // `core` is BUNDLED into this jar rather than published as its own artifact.
 // The core/plugin *module* split (D1) exists for development -- fast unit tests
@@ -141,12 +136,6 @@ dependencies {
     testRuntimeOnly(libs.junit.platform.launcher)
 
     agpTestKitClasspath(libs.android.gradle.plugin)
-    // Pinned literally, not via the version catalog: libs.versions.toml's
-    // `agp` is D9's floor (8.5.2, compileOnly-pinned so `plugin` can't
-    // accidentally compile against a newer API) -- this is the *other*
-    // matrix cell, used only for the TestKit fixture classpath below, never
-    // for compilation.
-    agp91TestKitClasspath("com.android.tools.build:gradle:9.1.0")
 }
 
 gradlePlugin {
@@ -204,28 +193,6 @@ tasks.named<PluginUnderTestMetadata>("pluginUnderTestMetadata") {
     pluginClasspath.from(agpTestKitClasspath, bundledCore)
 }
 
-// Task 3's AGP 9.1 cell: a second, independent PluginUnderTestMetadata task
-// (own name, own output directory) so its properties file never collides
-// with the default `pluginUnderTestMetadata` above on any classpath --
-// AndroidWiringAgp91FunctionalTest reads this one's output file directly by
-// path (via the system property wired into `tasks.test` below) rather than
-// relying on classpath-resource lookup, precisely so both metadata files can
-// coexist in the same `test` source set without one shadowing the other.
-val agp91PluginUnderTestMetadata = tasks.register<PluginUnderTestMetadata>("agp91PluginUnderTestMetadata") {
-    pluginClasspath.from(sourceSets["main"].runtimeClasspath, bundledCore, agp91TestKitClasspath)
-    outputDirectory.set(layout.buildDirectory.dir("agp91PluginUnderTestMetadata"))
-}
-
 tasks.test {
     useJUnitPlatform()
-    dependsOn(agp91PluginUnderTestMetadata)
-    // Lazy (flatMap on the task's own Provider<RegularFile>), not `.get()` on
-    // agp91PluginUnderTestMetadata directly -- the latter forces the task
-    // object at configuration time, which defeats configuration avoidance
-    // even though `dependsOn` above is already correctly lazy.
-    systemProperty(
-        "articulate.agp91PluginUnderTestMetadata",
-        agp91PluginUnderTestMetadata.flatMap { it.outputDirectory.file("plugin-under-test-metadata.properties") }
-            .get().asFile.absolutePath,
-    )
 }
