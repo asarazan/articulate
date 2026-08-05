@@ -560,6 +560,26 @@ The res defect lives in the Android **app** module, which has no such task, and 
 
 **Why this blocks more than it looks.** The `commonMain` token feature (§14 amendment) will hit the same defect for generated *source*, on the exact API users would be told to call. Fix this first.
 
+### 4.5b Option 3 — AGP consumes source; `validateStrings` is the gate — SPEC, 2026-08-03
+
+**Supersedes the `srcDir` workaround in 4.5.** Deletes code rather than adding it.
+
+**Premise, verified.** `GenerateAndroidResTask` is `copyTo` — the generated tree is **byte-identical** to `src/main/strings`, same `values/` and `values-de/` names, escaped apostrophe intact. It copies a directory that is already valid Android resource layout. Every IDE symptom traces to that copy existing only after a task runs, and sync does not run tasks.
+
+**Design.**
+1. **`:i18n`'s consumable configuration carries the SOURCE directory** (`extension.stringsDir`), not a task output. Because the files are always on disk, the IDE resolves the path at sync with nothing executed. This is the whole fix.
+2. **The artifact's `builtBy` is `validateStrings`**, a new task that parses the tree and hard-errors exactly as `generateAndroidRes` did. Resolving the configuration *for a build* therefore runs validation; resolving it *for a path* at sync does not. Fail-fast is preserved without reintroducing a sync dependency.
+3. **`GenerateAndroidResTask` is deleted.** Its only remaining job was the copy.
+4. **`ArticulateAndroidPlugin` registers the resolved directory as a res source** for the app module. Keep the resolvable-configuration mechanism exactly as-is — it is what survives isolated projects and distinct plugin classloaders (§4.5). Whether `ResolveArticulateAndroidResTask` survives depends on whether AGP will take the configuration directly; if it must be a real directory, keep the task but note it no longer gates IDE visibility.
+
+**Behavior changes to rule, not discover.**
+- §4.3's one-file-per-`values-*/` rule now lives in `validateStrings`. AGP would merge extra XML files happily; the gate must keep rejecting them so the rule does not silently invert.
+- Every D4/D6/D5b hard error moves from "blocks the copy" to "blocks the build via `validateStrings`". The **set** of rejected inputs must not change. That is the acceptance test.
+
+**Why the gate is not optional.** Android accepts plenty our iOS path rejects — inline markup (high frequency), `<string-array>`/`<array>` (high), multi-file `values-*/` (high when `stringsDir` points at a real `res/`), orphan keys and non-locale qualifiers (moderate). None fail *silently* — `generateXcstrings`/`verifyStrings` still error loudly — but without `validateStrings` the failure moves from immediate to deferred, and an Android dev ships green while breaking someone else's iOS build.
+
+**Pass criteria.** All existing tests green with no assertion weakened; the corpus's error cases still error via `validateStrings`; `sample/` builds; and — the one that matters — a **clean clone, sync only, no manual build**, with `R.string.your_key` resolving in the editor. That last step is human.
+
 ### 4.6 Configuration-cache rules — non-negotiable, and the reason M4's audit is Opus
 
 Config-cache violations are the archetypal silent failure: everything works until someone enables the cache, then breaks confusingly and far from the cause.
