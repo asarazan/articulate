@@ -580,6 +580,26 @@ The res defect lives in the Android **app** module, which has no such task, and 
 
 **Pass criteria.** All existing tests green with no assertion weakened; the corpus's error cases still error via `validateStrings`; `sample/` builds; and — the one that matters — a **clean clone, sync only, no manual build**, with `R.string.your_key` resolving in the editor. That last step is human.
 
+### 4.5c Static res registration under the AGP 9.1 floor — SPEC, 2026-08-03
+
+**Premise, probe-verified with a control (2026-08-03).** With only `variant.sources.res?.addStaticSourceDirectory(<path>)` registered from `onVariants` — the copy task's registration removed — an AGP 9.1 fixture compiled `R.string.hello` from `:i18n`'s *source* tree on both debug and release. The identical code under AGP 8.5.2 dies at configuration time (`Cannot create variant 'android-manifest-metadata' after dependency configuration ':app:debugApiElements' has been resolved`). This is what D9's revision buys; the floor bump exists so this section can be implemented.
+
+**The probe also exposed the one landmine: with static-only registration, `:i18n:validateStrings` never ran.** `addStaticSourceDirectory` takes a plain `String` and carries no task dependency, so nothing pulled the consumable configuration into the graph and the fail-fast gate was silently bypassed. §4.5b's whole point was that the gate survives; an implementation that loses it is wrong even if every existing test passes.
+
+**Design.**
+1. In `ArticulateAndroidPlugin`, inside `onVariants` (the proven window — earlier is the 8.5.x-style failure, `afterEvaluate` is proven silently too late): resolve `articulateAndroidResIncoming` to its single directory and call `variant.sources.res?.addStaticSourceDirectory(path)`. Resolution failures must stay **loud** — the existing "clear resolution error" tests for a missing project / missing plugin must keep passing. Do not use a lenient artifact view that would swallow them. If resolution yields no artifact, fail with a message naming the configured `i18nProject` path and the fix.
+2. **Delete `ResolveArticulateAndroidResTask`** and the `addGeneratedSourceDirectory` registration. No copy remains anywhere. Do **not** leave both registrations active "temporarily" — the same tree registered twice through two mechanisms is a shape no test has ever exercised.
+3. **Restore the validation edge explicitly:** make the app build depend on the incoming configuration itself (e.g. `preBuild.dependsOn(<the Configuration>)` — `Configuration` implements `Buildable`, which is the same load-bearing fact §4.5's redesign already documents), so resolving-for-a-build runs `validateStrings` while resolving-for-a-path at sync executes nothing. That asymmetry is the entire design.
+4. The eager resolution inside `onVariants` is new state for the configuration cache. CC store→reuse for the app path is an existing test and **must** stay green; if eager resolution breaks CC reuse, stop and report rather than route around.
+
+**Acceptance — all of these, each by test, and the gate proven red-first:**
+- `R.string` resolves in both cells (Gradle 9.3.1 floor and wrapper), both variants, with `build/generated/res/resolveArticulateAndroidRes` absent from the fixture after the build.
+- `:i18n:validateStrings` executes during an app compile, and — **proven red first** — an invalid string in the i18n fixture fails the *app* build with Articulate's own diagnostic naming file, key and fix; then restored green.
+- Configuration-cache reuse, isolated projects, and both-plugins-one-module tests all stay green.
+- `sample/` builds; its assertions updated to the new task topology.
+
+**What remains human, recorded not glossed:** Studio rendering. After this lands, a clean sync should resolve `R.string` with no build, because the registered path is the always-on-disk source tree. §4.5's open-defect entry gets amended to "expected fixed by §4.5c, awaiting human Studio confirmation" — it is not VERIFIED until a human syncs and says so.
+
 ### 4.6 Configuration-cache rules — non-negotiable, and the reason M4's audit is Opus
 
 Config-cache violations are the archetypal silent failure: everything works until someone enables the cache, then breaks confusingly and far from the cause.
@@ -630,6 +650,12 @@ CI recipe documented: `./gradlew generateStrings && git diff --exit-code`, *or* 
 
 ### E2. Supported Gradle/AGP range
 **DECIDED 2026-07-30 (D9): floor is AGP 8.5.2 / Gradle 8.7.** CI matrix of two cells — the floor, and AGP 9.1.
+
+**REVISED 2026-08-03: the Android floor moves to AGP 9.1.0 / Gradle 9.3.1. The base plugin's floor stays Gradle 8.7.** The original floor predates two findings: (a) `addStaticSourceDirectory` fed from the incoming configuration **works under AGP 9.1 and fails structurally under 8.5.x** (§4.5b's probe, run with a control) — and that mechanism is the only found path to sync-time IDE visibility of the res tree, the defect blocking publish; (b) Android Studio's own tooling (Upgrade Assistant, New Module wizard) already assumes AGP 9-era project layouts and malfunctions against the 8.5.2-shaped sample. Cost accepted knowingly: consumers below AGP 9.1 lose `net.sarazan.articulate.android`. Non-Android consumers lose nothing — D10 keeps AGP off the base plugin's classpath, so `net.sarazan.articulate` still needs only Gradle 8.7, and the two floors are now **separate constants** (`GRADLE_FLOOR_VERSION` = 8.7, `ANDROID_GRADLE_FLOOR_VERSION` = 9.3.1); collapsing them into one would silently narrow the base plugin's advertised range.
+
+Two shims ride along in `sample/gradle.properties`, both required and both **clocks, not settled state**: `android.newDsl=false` (KGP 2.4.10's `kotlin.android` casts to the hidden `BaseExtension`; the escape hatch is *removed in AGP 10*) and `android.builtInKotlin=false` (`:shared` is KMP and KMP requires KGP; built-in Kotlin cannot serve it). Revisit both when KGP ships new-DSL support.
+
+**Consequence for the test matrix: its axis changed.** Both cells now run AGP 9.1.0, so "floor AGP vs upper AGP" is dead; the real difference is **Gradle 9.3.1 (floor) vs the wrapper (9.5.0)**. Class names, configurations and docs still describing an AGP matrix (`AndroidWiringAgp91FunctionalTest`, `agp91TestKitClasspath`, `AGP_91_VERSION`) are lying and must be renamed or deleted — and with a single AGP version, the separate AGP-9.1 TestKit classpath machinery has no remaining job.
 
 The original recommendation here was AGP 8.1 / Gradle 8.5. It was revised because it predated knowing our own toolchain's limits: **KGP 2.4.10 supports AGP 8.5.2 – 9.1.0**, so a sample built with our pinned Kotlin cannot go below AGP 8.5.2. Advertising an 8.1 floor would mean claiming support for a configuration we could only partially verify — and the floor cell would have to use a different Kotlin than the one we develop against, so the advertised configuration would differ from the tested one. This project does not ship unverified claims; the floor is therefore set to what we can actually build and test end to end.
 
