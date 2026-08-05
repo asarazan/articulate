@@ -88,9 +88,17 @@ class SampleCompositeBuildFunctionalTest {
             .build()
 
         assertEquals(TaskOutcome.SUCCESS, result.task(":androidApp:compileDebugJavaWithJavac")!!.outcome)
-        // PLAN.md §4.5b: GenerateAndroidResTask is deleted -- validateStrings is the gate.
+        // PLAN.md §4.5c point 3: validateStrings is the gate, forced into
+        // this real build by preBuild.dependsOn(articulateAndroidResIncoming)
+        // -- resolveArticulateAndroidRes no longer exists (point 2: no copy
+        // task anywhere), so there is no task-input edge to force this any
+        // more; the preBuild edge is what does it now.
         assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:validateStrings")!!.outcome)
-        assertEquals(TaskOutcome.SUCCESS, result.task(":androidApp:resolveArticulateAndroidRes")!!.outcome)
+        assertEquals(
+            null,
+            result.task(":androidApp:resolveArticulateAndroidRes"),
+            "resolveArticulateAndroidRes is deleted by §4.5c -- it must not appear in the task graph at all",
+        )
     }
 
     @Test

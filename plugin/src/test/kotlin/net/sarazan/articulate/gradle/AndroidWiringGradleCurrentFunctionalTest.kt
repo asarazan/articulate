@@ -80,16 +80,16 @@ class AndroidWiringGradleCurrentFunctionalTest {
     }
 
     @Test
-    fun `wrapper Gradle -- generated Android res is registered as a variant source directory and R string resolves it`() {
+    fun `wrapper Gradle -- generated Android res is registered as a static variant source directory and R string resolves it`() {
         writeTwoModuleFixture()
 
         val result = gradleCurrentRunner(":app:compileDebugJavaWithJavac", ":app:compileReleaseJavaWithJavac").build()
 
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:compileDebugJavaWithJavac")!!.outcome)
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:compileReleaseJavaWithJavac")!!.outcome)
-        // PLAN.md §4.5b: GenerateAndroidResTask is deleted -- validateStrings is the gate.
+        // PLAN.md §4.5c point 3: validateStrings is the gate, forced into
+        // this real build by preBuild.dependsOn(articulateAndroidResIncoming).
         assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:validateStrings")!!.outcome)
-        assertEquals(TaskOutcome.SUCCESS, result.task(":app:resolveArticulateAndroidRes")!!.outcome)
         // Marker.java (written by writeAndroidAppModule) references
         // R.string.hello -- javac succeeding is proof this cell's resource
         // merge and R-class generation actually picked up the wired
@@ -98,29 +98,19 @@ class AndroidWiringGradleCurrentFunctionalTest {
         val checkedInRes = File(projectDir.toFile(), "app/src/main/res")
         assertFalse(checkedInRes.exists(), "app/src/main/res must never exist under the wrapper Gradle cell either")
 
-        // Before PLAN.md §4.5/§13's redesign, this cell genuinely diverged
-        // from the floor's: AGP 9.1 left GenerateAndroidResTask's output in
-        // place at the PRODUCING :i18n project's own build dir instead of
-        // relocating it into :app, unlike AGP 8.5.2. That divergence is gone
-        // now, not by accident: the task AGP wires via
-        // addGeneratedSourceDirectory is net.sarazan.articulate.android's own
-        // ResolveArticulateAndroidResTask, registered IN the app module --
-        // so "relocated into :app's build tree" and "left where the wired
-        // task wrote it" are the same location on both AGP cells. Verified
-        // 2026-08-01 against a real AGP 9.1 build (dumping the full
-        // app/build + i18n/build trees): both this file and the floor
-        // cell's equivalent assertion in AndroidWiringFunctionalTest now
-        // expect the identical relative path.
-        val relocated = File(projectDir.toFile(), "app/build/generated/res/resolveArticulateAndroidRes/values/strings.xml")
-        assertTrue(
-            relocated.isFile,
-            "expected the wrapper Gradle cell to relocate the generated res into :app's build dir exactly like the " +
-                "floor cell now does (PLAN.md §4.5/§13 redesign closed the prior divergence): $relocated",
+        // PLAN.md §4.5c point 2: ResolveArticulateAndroidResTask and its
+        // relocated output directory are both deleted -- there is no copy of
+        // :i18n's res anywhere under app/build on this cell either.
+        assertFalse(
+            File(projectDir.toFile(), "app/build/generated/res/resolveArticulateAndroidRes").exists(),
+            "resolveArticulateAndroidRes's task and its relocated output directory are both deleted by §4.5c -- " +
+                "this path must not exist under the wrapper Gradle cell either",
         )
 
-        // PLAN.md §4.5b: GenerateAndroidResTask is deleted -- :i18n no longer
-        // materializes any Android res copy of its own on either cell (see
-        // the identical assertion in AndroidWiringFunctionalTest).
+        // PLAN.md §4.5b, still true under §4.5c: GenerateAndroidResTask is
+        // deleted -- :i18n no longer materializes any Android res copy of
+        // its own on either cell (see the identical assertion in
+        // AndroidWiringFunctionalTest).
         assertFalse(
             File(projectDir.toFile(), "i18n/build/generated/i18n/res").exists(),
             "GenerateAndroidResTask is deleted -- :i18n must not generate its own Android res copy any more",
@@ -128,13 +118,18 @@ class AndroidWiringGradleCurrentFunctionalTest {
     }
 
     @Test
-    fun `wrapper Gradle -- articulateAndroidResIncoming resolves validateStrings's gate from a sibling module`() {
+    fun `wrapper Gradle -- resolving articulateAndroidResIncoming for a path alone does not run validateStrings`() {
         writeTwoModuleFixture()
 
-        val result = gradleCurrentRunner(":app:resolveArticulateAndroidRes").build()
+        val result = gradleCurrentRunner(":app:help").build()
 
-        assertEquals(TaskOutcome.SUCCESS, result.task(":app:resolveArticulateAndroidRes")!!.outcome)
-        assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:validateStrings")!!.outcome)
+        assertEquals(TaskOutcome.SUCCESS, result.task(":app:help")!!.outcome)
+        assertTrue(
+            result.task(":i18n:validateStrings") == null,
+            "expected :i18n:validateStrings NOT to run for a plain configuration-only task under the wrapper " +
+                "Gradle cell either -- resolving articulateAndroidResIncoming for a path must execute nothing " +
+                "(PLAN.md §4.5c): ${result.output}",
+        )
     }
 
     @Test

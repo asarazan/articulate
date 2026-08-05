@@ -20,7 +20,7 @@ import java.io.File
 import java.nio.file.Path
 
 /**
- * PLAN.md §4.5: `net.sarazan.articulate.android`'s variant res wiring,
+ * PLAN.md §4.5/§4.5c: `net.sarazan.articulate.android`'s variant res wiring,
  * exercised against a real Android SDK (`~/Library/Android/sdk`;
  * `android-34`/`android-37.0` platforms, build-tools `36.0.0`).
  *
@@ -42,33 +42,37 @@ import java.nio.file.Path
  *    sets this) -- a green CI run that silently skipped this whole class
  *    would have tested nothing, which is precisely the failure mode that env
  *    var exists to convert into a loud one.
- *  - AGP 8.5.2 (D9's floor) is not verified against this repo's *building*
- *    Gradle (9.5.0) -- AGP's own compatibility table pairs 8.5.x with Gradle
- *    8.7-8.9, and `compileSdk 34` is the ceiling AGP 8.5 supports (not "tested
- *    up to"; going higher either fails outright or passes against a
- *    configuration no floor consumer can run). Every fixture here therefore
- *    pins `.withGradleVersion(ANDROID_GRADLE_FLOOR_VERSION)`, exactly like
- *    [GradleFloorFunctionalTest] already does for the non-Android plugin --
- *    this suite is deliberately a floor-only exercise, not a "whatever's on
- *    this machine" one.
+ *  - This is the matrix's floor cell: AGP 9.1.0 (D9, REVISED 2026-08-03) is
+ *    not verified against this repo's *building* Gradle (9.5.0), so every
+ *    fixture here pins `.withGradleVersion(ANDROID_GRADLE_FLOOR_VERSION)`
+ *    (9.3.1), exactly like [GradleFloorFunctionalTest] already does for the
+ *    non-Android plugin's own floor -- this suite is deliberately a
+ *    floor-only exercise, not a "whatever's on this machine" one. See
+ *    [AndroidWiringGradleCurrentFunctionalTest] for the wrapper-Gradle cell.
  *
  * What's now genuinely verified (was previously only compile-checked against
  * the AGP jar, never run):
- *  - `variant.sources.res?.addGeneratedSourceDirectory(...)` actually
- *    registers the generated dir as a resource source for real debug *and*
- *    release variants -- proven by compiling a Java source that references
+ *  - `variant.sources.res?.addStaticSourceDirectory(path)` (PLAN.md §4.5c),
+ *    fed a path resolved eagerly from `articulateAndroidResIncoming` inside
+ *    `onVariants`, actually registers `:i18n`'s real, always-on-disk strings
+ *    source directory as a resource source for real debug *and* release
+ *    variants -- proven by compiling a Java source that references
  *    `R.string.hello`, which only resolves if AGP's resource merge and
  *    R-class generation actually picked up the wired directory (a stronger
- *    proof than asserting a task merely ran), plus a direct scan of the
- *    merged-resources output under `app/build` for the string.
+ *    proof than asserting a task merely ran).
  *  - [ArticulateAndroidExtension.i18nProject]'s dependency-based resolution
  *    (PLAN.md §4.5/§13 -- not a cross-project task lookup any more) resolves
- *    `:i18n`'s generated res from a real sibling module in a real
+ *    `:i18n`'s strings source tree from a real sibling module in a real
  *    multi-module build, and its two failure paths (missing project; project
  *    that hasn't applied `net.sarazan.articulate`) fail loudly with Gradle's
  *    own resolution diagnostics, which name the project path.
+ *  - §4.5c's asymmetry: resolving `articulateAndroidResIncoming` for a path
+ *    alone (any configuration, e.g. `:app:help`) runs `:i18n:validateStrings`
+ *    NEVER; only a real build, via `preBuild.dependsOn(configuration)`, does.
  *  - Nothing ever writes into a checked-in `res` source set -- `app/src/main/res`
  *    never exists, and the strings source tree is untouched after the build.
+ *  - There is no copy anywhere any more: `ResolveArticulateAndroidResTask`
+ *    and its output directory are deleted (§4.5c point 2).
  */
 class AndroidWiringFunctionalTest {
 
@@ -118,26 +122,34 @@ class AndroidWiringFunctionalTest {
     }
 
     /**
-     * PLAN.md §4.5b made [ResolveArticulateAndroidResTask]'s copy **selective**
-     * -- only `strings.xml` under each locale directory -- and that selectivity
-     * is load-bearing in a way nothing else covered until this test.
+     * PLAN.md §4.5c: `ResolveArticulateAndroidResTask` and its selective copy
+     * are deleted. There is no longer any filtering step between :i18n's raw
+     * source directory and AGP's resource merge -- `addStaticSourceDirectory`
+     * registers `:i18n`'s real `src/main/strings` tree **directly** as a res
+     * source for `:app`, whatever is in it.
      *
-     * Before §4.5b the task copied a tree `generateAndroidRes` had already
-     * filtered, so a blanket `copyRecursively` was harmless. §4.5b feeds it the
-     * consumer's **raw source directory** instead, and §4.3 explicitly blesses
-     * pointing `stringsDir` at a real `app/src/main/res` -- which routinely holds
-     * `colors.xml`, `dimens.xml`, `styles.xml`, plus editor litter like
-     * `.DS_Store`. A blanket copy drags all of it into the app's generated res,
-     * where a `colors.xml` carrying a name the app also defines is a duplicate
-     * resource: a build failure at best, a silent override at worst.
-     *
-     * The regression this pins is therefore invisible to every other test --
-     * they all use a fixture containing nothing but `strings.xml`, so blanket
-     * and selective copying are indistinguishable. Mutation-proven: restoring
-     * `copyRecursively` fails this and nothing else.
+     * §4.3 explicitly blesses pointing `stringsDir` at a real
+     * `app/src/main/res`-shaped directory, which routinely holds `colors.xml`,
+     * `dimens.xml`, plus editor litter like `.DS_Store`. §4.5c did not rule on
+     * what happens to those now that there is no copy to filter them out --
+     * this test exists to observe and pin the actual behavior, not to assert
+     * an outcome nobody verified. **Observed 2026-08-05, real AGP 9.1 build:**
+     * `colors.xml` and `dimens.xml` beside `strings.xml` are merged into the
+     * app's resources exactly like any other file AGP finds under a
+     * `values`-qualified directory in a registered res source directory --
+     * `colorPrimary`/`gutter` compile as
+     * ordinary app resources, and `.DS_Store` is silently ignored by AGP's
+     * resource merger (it already ignores non-resource files by convention,
+     * independent of anything Articulate does). This is a genuine behavior
+     * change from §4.5b's copy-based approach, which filtered to
+     * `strings.xml` only: a consumer whose i18n source tree contains
+     * presentation resources now has them flow into the app's build. Nothing
+     * here fails or errors -- the risk is a same-name collision with the
+     * app's own resources, which is an ordinary Android duplicate-resource
+     * build failure, not a new failure mode this plugin introduces.
      */
     @Test
-    fun `presentation files and editor litter beside strings xml are not copied into the app's generated res`() {
+    fun `presentation files and editor litter beside strings xml flow directly into the app's merged resources`() {
         val i18nDir = writeTwoModuleFixture()
         val values = File(i18nDir, "src/main/strings/values")
         File(values, "colors.xml").writeText(
@@ -156,24 +168,33 @@ class AndroidWiringFunctionalTest {
         )
         File(values, ".DS_Store").writeBytes(byteArrayOf(0, 0, 0, 1))
 
-        androidRunner(":app:resolveArticulateAndroidRes").build()
+        val javaDir = File(projectDir.toFile(), "app/src/main/java/net/sarazan/articulate/fixture/app").apply { mkdirs() }
+        File(javaDir, "PresentationMarker.java").writeText(
+            """
+            package net.sarazan.articulate.fixture.app;
 
-        val generatedValues = File(projectDir.toFile(), "app/build/generated/res/resolveArticulateAndroidRes/values")
-        val copied = generatedValues.listFiles().orEmpty().map { it.name }.sorted()
-        assertTrue(
-            copied.contains("strings.xml"),
-            "guard: strings.xml must be copied, otherwise the assertions below pass for the wrong reason. Got: $copied",
+            /** Compiles only if R.color.colorPrimary and R.dimen.gutter resolve too, not just R.string -- proof
+             * presentation files beside strings.xml reach AGP's merge now that there is no filtering copy (PLAN.md §4.5c). */
+            public final class PresentationMarker {
+                public static final int COLOR_PRIMARY_ID = R.color.colorPrimary;
+                public static final int GUTTER_ID = R.dimen.gutter;
+                private PresentationMarker() {}
+            }
+            """.trimIndent(),
         )
+
+        val result = androidRunner(":app:compileDebugJavaWithJavac").build()
+
         assertEquals(
-            listOf("strings.xml"),
-            copied,
-            "only values*/strings.xml may reach the app's generated res -- anything else can collide with the " +
-                "app's own resources (PLAN.md §4.5b). Got: $copied",
+            TaskOutcome.SUCCESS,
+            result.task(":app:compileDebugJavaWithJavac")!!.outcome,
+            "expected R.color.colorPrimary and R.dimen.gutter (declared beside strings.xml in :i18n's source " +
+                "tree) to compile -- proof they reached AGP's resource merge with no filtering step:\n${result.output}",
         )
     }
 
     @Test
-    fun `generated Android res is registered as a variant source directory and R string resolves it`() {
+    fun `generated Android res is registered as a static variant source directory and R string resolves it`() {
         val i18nDir = writeTwoModuleFixture()
 
         val result = androidRunner(":app:compileDebugJavaWithJavac", ":app:compileReleaseJavaWithJavac").build()
@@ -181,9 +202,10 @@ class AndroidWiringFunctionalTest {
         // Per-variant: both debug and release wired, not just whichever is default.
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:compileDebugJavaWithJavac")!!.outcome)
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:compileReleaseJavaWithJavac")!!.outcome)
-        // PLAN.md §4.5b: GenerateAndroidResTask is deleted -- :i18n's gate is
-        // now validateStrings, forced into this real build by resolveArticulateAndroidRes's
-        // @InputFiles on the resolvable configuration (builtBy).
+        // PLAN.md §4.5c point 3: :i18n's gate is validateStrings, forced into
+        // this real build by preBuild.dependsOn(articulateAndroidResIncoming)
+        // -- not by any task's @InputFiles any more, since no task resolves
+        // this configuration for its file contents.
         assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:validateStrings")!!.outcome)
         // compileDebugJavaWithJavac succeeding compiles Marker.java, which
         // references R.string.hello -- this only resolves if AGP actually
@@ -191,91 +213,122 @@ class AndroidWiringFunctionalTest {
         // generated a symbol for it. A task merely running would not prove
         // this; an unresolved symbol fails javac, not silently no-ops.
 
-        // Belt-and-suspenders: the generated string also appears somewhere
-        // in AGP's own merged-resources output under app/build.
-        val mergedHasHello = File(projectDir.toFile(), "app/build").walkTopDown()
-            .filter { it.isFile && it.extension == "xml" }
-            .any { it.readText().contains("name=\"hello\"") }
-        assertTrue(mergedHasHello, "expected the merged resources under app/build to contain the generated 'hello' string")
-
         // §4.5's hard requirement: never write into a checked-in res source set.
         val checkedInRes = File(projectDir.toFile(), "app/src/main/res")
         assertFalse(checkedInRes.exists(), "app/src/main/res must never exist -- nothing may write into a checked-in res source set")
 
-        // The strings source tree itself is untouched.
+        // The strings source tree itself is untouched -- doubly true now
+        // that there is no copy task at all, only a static registration of
+        // this exact directory.
         val sourceStrings = File(i18nDir, "src/main/strings/values/strings.xml")
         assertTrue(
             sourceStrings.readText().contains("<string name=\"hello\">Hello</string>"),
             "the source strings.xml must be untouched by the build",
         )
 
-        // Generated Android res lives only under build/, per §4.4.
-        // Where AGP actually puts it. `addGeneratedSourceDirectory(task, wiredWith)`
-        // means AGP *owns* the output location: it sets the wired DirectoryProperty
-        // itself, overriding whatever convention the task declared. The output
-        // therefore lands in the CONSUMING app project's build dir, in a folder
-        // named after the WIRED task -- not named after generateAndroidRes: the
-        // task AGP wires is now net.sarazan.articulate.android's own
-        // ResolveArticulateAndroidResTask ("resolveArticulateAndroidRes"),
-        // registered in the app module, not the i18n-owning task directly.
-        //
-        // Verified empirically 2026-07-30 (Google's own "extend AGP" page states
-        // the opposite; observation wins). This corrects PLAN.md §4.4, which
-        // described the output as living at i18n/build/generated/i18n/res.
-        val generated = File(projectDir.toFile(), "app/build/generated/res/resolveArticulateAndroidRes/values/strings.xml")
-        assertTrue(
-            generated.isFile,
-            "expected AGP-relocated generated res at app/build/generated/res/resolveArticulateAndroidRes/values/strings.xml",
+        // PLAN.md §4.5c point 2: ResolveArticulateAndroidResTask and the
+        // addGeneratedSourceDirectory relocation are both deleted -- there is
+        // no longer any copy of :i18n's res anywhere under app/build. This is
+        // the load-bearing assertion distinguishing §4.5c from §4.5b: the old
+        // path must be genuinely ABSENT, not merely unchecked.
+        assertFalse(
+            File(projectDir.toFile(), "app/build/generated/res/resolveArticulateAndroidRes").exists(),
+            "resolveArticulateAndroidRes's task and its relocated output directory are both deleted by §4.5c -- " +
+                "this path must not exist any more",
         )
-        val localeGenerated = File(projectDir.toFile(), "app/build/generated/res/resolveArticulateAndroidRes/values-de/strings.xml")
-        assertTrue(localeGenerated.isFile, "per-locale generated res must be relocated alongside the default")
 
-        // PLAN.md §4.5b, genuinely different from the pre-4.5b invariant:
-        // :i18n no longer generates ANY Android res copy of its own --
-        // GenerateAndroidResTask is deleted, and the consumable
-        // configuration now publishes :i18n's real source directory
-        // directly. There is nothing under :i18n/build for the Android path
-        // at all any more.
+        // PLAN.md §4.5b, still true under §4.5c: :i18n no longer generates
+        // ANY Android res copy of its own -- GenerateAndroidResTask is
+        // deleted, and the consumable configuration publishes :i18n's real
+        // source directory directly. There is nothing under :i18n/build for
+        // the Android path at all any more.
         assertFalse(
             File(i18nDir, "build/generated/i18n/res").exists(),
             "GenerateAndroidResTask is deleted -- :i18n must not generate its own Android res copy any more",
         )
     }
 
+    /**
+     * PLAN.md §4.5c's landmine, tested directly: `addStaticSourceDirectory`
+     * carries no task dependency, so resolving `articulateAndroidResIncoming`
+     * purely to read a path (which this plugin's `afterEvaluate` callback
+     * does for *any* requested task, including `:app:help` -- afterEvaluate
+     * runs during ordinary project configuration, whether or not the
+     * requested task ever touches this configuration as a real input) must
+     * NOT pull `:i18n:validateStrings` into the task graph. Only a real
+     * build -- anything that runs `preBuild` -- does that, via the explicit
+     * `preBuild.dependsOn(configuration)` edge. This is the asymmetry
+     * §4.5c's whole design rests on; this test proves both halves of it in
+     * one fixture: `:app:help` succeeds (dependency-based resolution works,
+     * no cross-project task lookup) AND `:i18n:validateStrings` never ran.
+     */
     @Test
-    fun `articulateAndroidResIncoming resolves the sibling i18n module's generated res via dependency resolution, not a task lookup`() {
-        val i18nDir = writeTwoModuleFixture()
+    fun `resolving articulateAndroidResIncoming for a path alone does not run validateStrings`() {
+        writeTwoModuleFixture()
 
-        // Unlike the pre-redesign implementation, plain configuration (e.g.
-        // `:app:help`) no longer touches the cross-project dependency at all
-        // -- resolution is now genuinely lazy, deferred to whenever
-        // resolveArticulateAndroidRes's inputs are actually needed (PLAN.md
-        // §4.5/§13). Requesting that task directly is therefore the
-        // narrowest real proof the dependency-based mechanism resolves
-        // :i18n's generated res correctly, with no `dependsOn` declared
-        // anywhere in ArticulateAndroidPlugin -- the ordering is carried
-        // implicitly by the configuration's artifact `builtBy`.
-        val result = androidRunner(":app:resolveArticulateAndroidRes").build()
+        val result = androidRunner(":app:help").build()
 
-        assertEquals(TaskOutcome.SUCCESS, result.task(":app:resolveArticulateAndroidRes")!!.outcome)
-        // PLAN.md §4.5b: GenerateAndroidResTask is deleted -- validateStrings
-        // is the gate resolveArticulateAndroidRes's @InputFiles forces in.
-        assertEquals(TaskOutcome.SUCCESS, result.task(":i18n:validateStrings")!!.outcome)
-
-        // AGP relocates resolveArticulateAndroidRes's output as soon as it
-        // creates variants during project configuration (§4.4/§4.5), which
-        // happens regardless of which task was actually requested -- so even
-        // this narrow, non-compile invocation already sees the relocated
-        // path, not resolveArticulateAndroidRes's own build/generated/articulate/res
-        // convention.
-        val resolved = File(projectDir.toFile(), "app/build/generated/res/resolveArticulateAndroidRes/values/strings.xml")
+        assertEquals(TaskOutcome.SUCCESS, result.task(":app:help")!!.outcome)
         assertTrue(
-            resolved.isFile && resolved.readText().contains("<string name=\"hello\">Hello</string>"),
-            "expected resolveArticulateAndroidRes to have materialized :i18n's generated res, sourced via " +
-                "dependency resolution rather than a cross-project task lookup: $resolved",
+            result.task(":i18n:validateStrings") == null,
+            "expected :i18n:validateStrings NOT to run for a plain configuration-only task -- resolving " +
+                "articulateAndroidResIncoming for a path must execute nothing (PLAN.md §4.5c): ${result.output}",
         )
-        // Sanity: the source module used for this resolution really is :i18n.
-        assertTrue(i18nDir.name == "i18n")
+    }
+
+    /**
+     * PLAN.md §4.5c's acceptance criterion, "proven red first": an invalid
+     * strings source (`<string-array>`, a documented D6 hard error) must fail
+     * the APP build -- not merely `:i18n`'s own build -- with Articulate's
+     * own diagnostic (not a raw AGP resource-merge error, and not silently
+     * accepted), because `preBuild.dependsOn(articulateAndroidResIncoming)`
+     * pulls `:i18n:validateStrings` into `:app`'s task graph before
+     * compilation. This is the whole point of restoring the edge §4.5c's
+     * landmine would otherwise silently drop.
+     *
+     * **Proven red first, 2026-08-05 (this file's git history is not
+     * available to this agent, so the proof is recorded here instead):**
+     * backed up `ArticulateAndroidPlugin.kt`, deleted the
+     * `project.tasks.named("preBuild").configure { it.dependsOn(articulateAndroidResIn) }`
+     * block entirely, reran exactly this test. Result: `UnexpectedBuildSuccess`
+     * -- `:app:compileDebugJavaWithJavac` **succeeded** with the invalid
+     * `<string-array>` still in `:i18n`'s source tree, because
+     * `:i18n:validateStrings` never entered `:app`'s task graph at all (the
+     * exact landmine PLAN.md §4.5c's premise describes: `addStaticSourceDirectory`
+     * carries no task dependency, so with the edge gone nothing pulls the
+     * gate in). Restored the file from the backup; reran the full class,
+     * confirmed all tests green again, including this one.
+     */
+    @Test
+    fun `an invalid string in the i18n fixture fails the app build with Articulate's own diagnostic`() {
+        val i18nDir = writeTwoModuleFixture()
+        File(i18nDir, "src/main/strings/values/strings.xml").writeText(
+            """
+            <resources>
+                <string name="hello">Hello</string>
+                <string-array name="days">
+                    <item>Mon</item>
+                    <item>Tue</item>
+                </string-array>
+            </resources>
+            """.trimIndent(),
+        )
+
+        val result = androidRunner(":app:compileDebugJavaWithJavac").buildAndFail()
+
+        assertEquals(
+            TaskOutcome.FAILED,
+            result.task(":i18n:validateStrings")!!.outcome,
+            "expected :i18n:validateStrings to run (pulled in via preBuild.dependsOn) and fail the app build:\n${result.output}",
+        )
+        assertTrue(
+            result.output.contains("strings.xml") &&
+                result.output.contains("<string-array>") &&
+                result.output.contains("days_0"),
+            "expected Articulate's own diagnostic -- naming the file (strings.xml), the offending construct " +
+                "(<string-array>), and the fix (split into 'days_0', 'days_1', ...) -- not a raw AGP resource " +
+                "merge error:\n${result.output}",
+        )
     }
 
     @Test
@@ -283,20 +336,14 @@ class AndroidWiringFunctionalTest {
         writeAndroidSettings(projectDir, modules = listOf("app"))
         writeAndroidAppModule(projectDir, i18nProjectPath = ":does-not-exist", withMarker = false)
 
-        // Resolution is lazy (§4.5/§13's redesign) -- unlike the old
-        // cross-project task lookup, plain configuration (`:app:help`) no
-        // longer touches it. Requesting the task that actually needs the
-        // resolved res is what surfaces the failure now. The message is
-        // Gradle's own dependency-resolution diagnostic, not a custom
-        // Articulate-authored one (§4.5's requirements are about *how* the
-        // lookup happens -- no cross-project task-container access, no
-        // cross-classloader class identity -- not about who authors the
-        // failure text), and it already names the exact project path.
-        val result = androidRunner(":app:resolveArticulateAndroidRes").buildAndFail()
+        // PLAN.md §4.5c: resolution now happens eagerly inside onVariants,
+        // at CONFIGURATION time for :app -- which runs for any requested
+        // task, not just one that declares this configuration as an input.
+        // :app:help is enough to trigger it.
+        val result = androidRunner(":app:help").buildAndFail()
 
         assertTrue(
-            result.output.contains("Could not determine the dependencies of task ':app:resolveArticulateAndroidRes'") &&
-                result.output.contains("Project with path ':does-not-exist' could not be found"),
+            result.output.contains("Project with path ':does-not-exist' could not be found"),
             "expected a clear resolution error naming the missing project:\n${result.output}",
         )
     }
@@ -310,7 +357,7 @@ class AndroidWiringFunctionalTest {
         File(i18nDir, "build.gradle").writeText("")
         writeAndroidAppModule(projectDir, withMarker = false)
 
-        val result = androidRunner(":app:resolveArticulateAndroidRes").buildAndFail()
+        val result = androidRunner(":app:help").buildAndFail()
 
         assertTrue(
             result.output.contains("Could not resolve project :i18n") &&
@@ -321,7 +368,7 @@ class AndroidWiringFunctionalTest {
     }
 
     @Test
-    fun `applying both plugin IDs to a single module resolves its own generated res without a raw CircularReferenceException`() {
+    fun `applying both plugin IDs to a single module resolves its own res without a raw CircularReferenceException`() {
         // PLAN.md §4.5's explicit requirement: applying both plugins to one
         // module must not deadlock or produce a raw Gradle error naming
         // nothing about Articulate (the pre-redesign implementation threw
@@ -373,15 +420,32 @@ class AndroidWiringFunctionalTest {
             </manifest>
             """.trimIndent(),
         )
+        val javaDir = File(mainDir, "java/net/sarazan/articulate/fixture/selfapp").apply { mkdirs() }
+        File(javaDir, "Marker.java").writeText(
+            """
+            package net.sarazan.articulate.fixture.selfapp;
 
-        val result = androidRunner(":app:resolveArticulateAndroidRes").build()
+            /** Compiles only if R.string.hello resolves -- proof the self-applied module's own strings tree reached AGP's merge. */
+            public final class Marker {
+                public static final int HELLO_STRING_ID = R.string.hello;
+                private Marker() {}
+            }
+            """.trimIndent(),
+        )
 
-        assertEquals(TaskOutcome.SUCCESS, result.task(":app:resolveArticulateAndroidRes")!!.outcome)
-        // PLAN.md §4.5b: GenerateAndroidResTask is deleted -- validateStrings is the gate.
+        val result = androidRunner(":app:compileDebugJavaWithJavac").build()
+
+        assertEquals(TaskOutcome.SUCCESS, result.task(":app:compileDebugJavaWithJavac")!!.outcome)
+        // PLAN.md §4.5c: validateStrings is the gate, forced in via
+        // preBuild.dependsOn(articulateAndroidResIncoming) -- same-project
+        // self-application means both the resolvable AND consumable
+        // configuration, and both plugins' tasks, live in :app itself.
         assertEquals(TaskOutcome.SUCCESS, result.task(":app:validateStrings")!!.outcome)
         assertFalse(result.output.contains("CircularReferenceException"))
-        val resolved = File(appDir, "build/generated/res/resolveArticulateAndroidRes/values/strings.xml")
-        assertTrue(resolved.isFile, "expected the self-applied module's own generated res to resolve: $resolved")
+        assertFalse(
+            File(appDir, "build/generated/res/resolveArticulateAndroidRes").exists(),
+            "resolveArticulateAndroidRes is deleted by §4.5c -- must not exist even in the self-apply case",
+        )
     }
 
     @Test

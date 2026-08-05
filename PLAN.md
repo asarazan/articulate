@@ -560,6 +560,8 @@ The res defect lives in the Android **app** module, which has no such task, and 
 
 **Why this blocks more than it looks.** The `commonMain` token feature (§14 amendment) will hit the same defect for generated *source*, on the exact API users would be told to call. Fix this first.
 
+Expected fixed by §4.5c (static source registration, 2026-08-03) — awaiting human Studio confirmation; not VERIFIED until a human syncs and says so.
+
 ### 4.5b Option 3 — AGP consumes source; `validateStrings` is the gate — SPEC, 2026-08-03
 
 **Supersedes the `srcDir` workaround in 4.5.** Deletes code rather than adding it.
@@ -597,6 +599,14 @@ The res defect lives in the Android **app** module, which has no such task, and 
 - `:i18n:validateStrings` executes during an app compile, and — **proven red first** — an invalid string in the i18n fixture fails the *app* build with Articulate's own diagnostic naming file, key and fix; then restored green.
 - Configuration-cache reuse, isolated projects, and both-plugins-one-module tests all stay green.
 - `sample/` builds; its assertions updated to the new task topology.
+
+**AMENDED 2026-08-03, same day, by implementation.** Two of this spec's premises were 8.5.2 facts projected onto 9.1, and both fell when run:
+- *"Resolve inside `onVariants`"* breaks the both-plugins-one-module acceptance criterion under 9.1: eager resolution there forces AGP-managed configurations to be observed before KGP's own `afterEvaluate` mutates them (`Cannot mutate the hierarchy of configuration ':app:debugRuntimeClasspath'`). Confirmed with a control ruling out attribute-matching ambiguity.
+- *"`afterEvaluate` is proven silently too late"* was true under 8.5.2 (via `mapDebugSourceSetPaths`) and **is no longer true under 9.1**: the shipped implementation collects variants in `onVariants` and defers resolve + `addStaticSourceDirectory` to `project.afterEvaluate`, and `R.string` compiles from the source tree in both cells.
+
+The shipped shape is therefore: collect in `onVariants`, register in `afterEvaluate`, gate via `preBuild.dependsOn(<Configuration>)`. Full experimental record in `ArticulateAndroidPlugin.kt`'s KDoc. This is the third time a DECIDED/spec'd claim in this file was corrected by the first attempt to run it; the evidence-tag rule exists for exactly this.
+
+**OPEN RULING — presentation files now flow through (behavior change §4.5b's copy used to mask).** With the source tree registered directly as a res root, a `colors.xml`/`dimens.xml` sitting beside `strings.xml` in `stringsDir` now reaches the app's merged resources (`R.color.colorPrimary` compiles from the app; observed, and pinned by test as observed behavior, not as endorsed behavior). Under §4.5b's selective copy they were filtered out. `.DS_Store` is ignored by AGP's own merger. This matters most for §4.3's "point `stringsDir` at a real `res/`" adoption path, where such files are guaranteed present — and where the same tree may now be registered as a res root twice (once by the app itself, once via Articulate). Options when ruled: accept and document (Android-only convenience, iOS still ignores them); have `validateStrings` warn; or hard-error non-strings XML in `stringsDir` (would break the real-res adoption path). Not ruled here.
 
 **What remains human, recorded not glossed:** Studio rendering. After this lands, a clean sync should resolve `R.string` with no build, because the registered path is the always-on-disk source tree. §4.5's open-defect entry gets amended to "expected fixed by §4.5c, awaiting human Studio confirmation" — it is not VERIFIED until a human syncs and says so.
 
