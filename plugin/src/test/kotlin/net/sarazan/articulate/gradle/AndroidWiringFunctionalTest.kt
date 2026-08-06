@@ -194,7 +194,7 @@ class AndroidWiringFunctionalTest {
     }
 
     @Test
-    fun `generated Android res is registered as a static variant source directory and R string resolves it`() {
+    fun `generated Android res is registered via DSL srcDir at finalizeDsl and R string resolves it`() {
         val i18nDir = writeTwoModuleFixture()
 
         val result = androidRunner(":app:compileDebugJavaWithJavac", ":app:compileReleaseJavaWithJavac").build()

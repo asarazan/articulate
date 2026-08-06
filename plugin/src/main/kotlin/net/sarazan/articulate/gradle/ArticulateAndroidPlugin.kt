@@ -1,5 +1,6 @@
 package net.sarazan.articulate.gradle
 
+import com.android.build.api.dsl.ApplicationExtension
 import com.android.build.api.variant.ApplicationAndroidComponentsExtension
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
@@ -9,8 +10,13 @@ import org.gradle.api.Project
  * `net.sarazan.articulate.android` (PLAN.md §4.2/§4.5/§4.5c/D10). Applied to
  * the Android **app** module. Its only job is variant res wiring --
  * registering the i18n-owning module's strings source tree (conventionally
- * `:i18n`, see [ArticulateAndroidExtension.i18nProject]) directly as a
- * **static** res source directory for every variant.
+ * `:i18n`, see [ArticulateAndroidExtension.i18nProject]) as a res source
+ * directory on the app module's `main` Android source set, which covers
+ * every variant without any per-variant registration. **As of the SECOND
+ * AMENDMENT, 2026-08-06 (PLAN.md §4.5c)** this is a literal-path DSL
+ * `sourceSets["main"].res.srcDir(...)` call made from `finalizeDsl` -- see
+ * the dated section near the end of this KDoc for why, and for the two
+ * mechanisms it replaces, kept above as history.
  *
  * AGP is `compileOnly` (D9, pinned to the 9.1 floor, REVISED 2026-08-03) and
  * referenced only from this file, never from [ArticulatePlugin] or anything
@@ -23,8 +29,16 @@ import org.gradle.api.Project
  * `compileSdk 37`) against an installed SDK and compiles a Java source
  * referencing `R.string.hello` -- proof the wired directory actually reached
  * AGP's resource merge, not merely that a task ran. Never write into a
- * variant's checked-in `res` source set; never use the legacy
- * `sourceSets["main"].res.srcDir` (both settled, §4.5).
+ * variant's checked-in `res` source set -- that rule still holds. **The
+ * companion rule directly below, "never use the legacy
+ * `sourceSets["main"].res.srcDir` (both settled, §4.5)", is OVERTURNED as of
+ * 2026-08-06** -- kept here rather than deleted, because it was a real,
+ * reasoned ruling at the time and the record should show it was reversed,
+ * not silently disappear. It is reversed because the Variant API alternative
+ * that motivated it (`addStaticSourceDirectory`) was subsequently proven
+ * blind to Android Studio's editor model, while the legacy DSL `srcDir` call
+ * was proven to reach it. See the "SECOND AMENDMENT, 2026-08-06" section
+ * near the end of this KDoc for the evidence.
  *
  * **Cross-project mechanism, redesigned 2026-08-01 (PLAN.md §4.5/§13,
  * release-blocking).** The previous implementation resolved the producing
@@ -216,21 +230,92 @@ import org.gradle.api.Project
  * closes this gap** (PLAN.md §E2). This historical record stays accurate for
  * 8.5.2 as a description of *that floor's* behavior.
  *
- * **It does not, however, describe this plugin's actual behavior under 9.1,
- * on either count -- and both differences matter.** First, §4.5c's own text
- * expected `onVariants` itself to be the safe-and-effective window under 9.1;
- * true for the cross-project case, but not for the self-application case (see
- * the "§4.5c correction" section above) -- so this plugin does not, in fact,
- * call `addStaticSourceDirectory` from inside `onVariants`. Second, and
- * because of that: this plugin resolves and adds from `project.afterEvaluate`
- * -- exactly the mechanism this historical record calls a dead end -- and
- * under AGP 9.1 that dead end is gone. The 8.5.2-era "AGP snapshots the
- * source-directory list before afterEvaluate fires" behavior was re-tested,
- * not assumed to still hold, and it no longer does: `addStaticSourceDirectory`
- * called from `afterEvaluate` reaches AGP 9.1's real resource merge, verified
- * by the same `R.string.hello` compile proof [AndroidWiringFunctionalTest]
- * uses throughout. A human should reconcile PLAN.md §4.5c's text with this,
- * since this file's KDoc is the record of what was actually built and why.
+ * The above ("§4.5c correction, found implementing it 2026-08-05") described
+ * this plugin's actual, shipped behavior at the time: `onVariants` collecting
+ * variant references, `project.afterEvaluate` resolving the configuration and
+ * calling `addStaticSourceDirectory` on each collected variant, verified
+ * under AGP 9.1 with a control against the 8.5.2-era dead end. **That is no
+ * longer what this plugin does.** It shipped, it passed its suite (250/0/0),
+ * and it is kept above, unedited, as history -- the paragraph immediately
+ * below is what replaced it and why.
+ *
+ * **SECOND AMENDMENT, 2026-08-06 (PLAN.md §4.5c) -- the registration
+ * mechanism changes again, and this time supersedes the Variant API
+ * approach entirely, not just its resolution window.**
+ *
+ * Two findings, each independently verified, forced the change:
+ *
+ *  - **The Variant API registration (`addStaticSourceDirectory`, from either
+ *    `onVariants` or `afterEvaluate` -- both variants of it above) is proven
+ *    blind to Android Studio's editor model, by a two-sided human
+ *    experiment.** With only that mechanism wired, `R.string.hello` was red
+ *    in Studio's editor although the build compiled it cleanly. It resolved
+ *    the instant the identical directory was *also* added by hand on the DSL
+ *    consumer side (`sourceSets["main"].res.srcDir(...)`, outside this
+ *    plugin, at ordinary script-evaluation time) -- and went red again the
+ *    moment that hand-added DSL line was removed, with the Variant API
+ *    registration still in place and the build still green throughout. The
+ *    build was never the problem; Studio's editor model reads the DSL, not
+ *    the Variant API's `Sources` interface.
+ *  - **AGP rejects a lazy (`Provider`) payload in the DSL SourceSet API, by
+ *    design.** An attempt to keep the DSL registration lazy -- feeding
+ *    `sourceSets["main"].res.srcDir(...)` a `Provider`-backed value instead
+ *    of a literal path -- fails outright with AGP's own diagnostic: *"You
+ *    cannot add Provider instances to the Android SourceSet API ... use the
+ *    Sources interface"* (reproduced as 14 test failures). The DSL API only
+ *    accepts a literal, already-resolved path.
+ *
+ * **Ruled and shipped mechanism:** resolve
+ * [ARTICULATE_ANDROID_RES_INCOMING_CONFIGURATION] eagerly, inside
+ * `androidComponents.finalizeDsl { }`, and register the resolved absolute
+ * path directly via `androidExtension.sourceSets["main"].res.srcDir(path)`.
+ * `addStaticSourceDirectory` and the `onVariants` variant-collection loop --
+ * both described in the history above -- are deleted outright: one
+ * mechanism, one registration, no `Provider`, no `afterEvaluate`.
+ *
+ * **Why `finalizeDsl` is the window -- three reasons, not one:**
+ *  1. It runs *after* the consumer's `articulateAndroid { i18nProject = ... }`
+ *     extension block has already executed, so [ArticulateAndroidExtension.i18nProject]
+ *     is a real, consumer-supplied value by the time this callback reads it
+ *     -- the same ordering hazard this plugin's `apply()` already defuses
+ *     for the `Provider`-based dependency below applies here too, and
+ *     `finalizeDsl` defuses it for this eager read the same way.
+ *  2. The DSL is still mutable -- that is `finalizeDsl`'s entire documented
+ *     purpose, and it is what makes a literal-path
+ *     `sourceSets["main"].res.srcDir(...)` call legal at all.
+ *  3. It runs *before* AGP creates the per-variant consumable configurations
+ *     (`debugRuntimeElements` etc.) whose consume-marking is what made the
+ *     self-application case (`articulateAndroid { i18nProject = ":app" }`,
+ *     both plugin IDs on one module) explode inside `onVariants` under the
+ *     old mechanism -- see the "§4.5c correction" section above for the
+ *     exact stack trace. Those configurations cannot be marked "consumed as
+ *     a variant" if they do not exist yet, so this is not a workaround for
+ *     that race, it removes the precondition for it: the self-apply fixture
+ *     stays green under `finalizeDsl` without needing the
+ *     `onVariants`-collect/`afterEvaluate`-resolve split the previous
+ *     mechanism required.
+ *
+ * The `preBuild.dependsOn(<Configuration>)` gate immediately below is
+ * unchanged by this amendment -- it was never about which API adds the
+ * directory, only about whether resolving the configuration is wired into a
+ * real build's task graph, and that wiring is independent of the
+ * registration call.
+ *
+ * **What is proven and what is not.** 250/0/0 across the whole matrix
+ * (cross-project, both-plugins-one-module, isolated projects,
+ * configuration-cache reuse, and the red-first `validateStrings`-gate test)
+ * proves the build path is unaffected. The consumer half of the two-sided
+ * editor experiment above proves *some* DSL `srcDir` registration is visible
+ * to Studio's sync. **What that experiment does NOT establish is whether a
+ * registration added specifically at `finalizeDsl` time is visible the same
+ * way** -- the consumer experiment added its line at ordinary
+ * script-evaluation time, an earlier window than `finalizeDsl`. That gap is
+ * the residual risk, closed only by a human syncing this plugin's own output
+ * in Android Studio and reporting `R.string` resolved with nothing built.
+ * PLAN.md §4.5's open-defect entry is amended to say so and stays open until
+ * that happens. If `finalizeDsl`-time registration turns out not to be
+ * editor-visible, the documented fallback is the consumer one-liner, which
+ * the experiment above already proved works.
  */
 class ArticulateAndroidPlugin : Plugin<Project> {
 
@@ -239,6 +324,7 @@ class ArticulateAndroidPlugin : Plugin<Project> {
         extension.i18nProject.convention(":i18n")
 
         project.pluginManager.withPlugin("com.android.application") {
+            val androidExtension = project.extensions.getByType(ApplicationExtension::class.java)
             val androidComponents = project.extensions.getByType(ApplicationAndroidComponentsExtension::class.java)
 
             // Resolvable side of the ArticulatePlugin.kt consumable
@@ -274,46 +360,44 @@ class ArticulateAndroidPlugin : Plugin<Project> {
             // preDebugBuild and preReleaseBuild depend on, so this covers
             // every variant without a per-variant edge. This is what makes
             // "resolving-for-a-build runs validateStrings" true again even
-            // though addStaticSourceDirectory's own resolution below (used
-            // purely to read a path) does not carry any task dependency.
+            // though the finalizeDsl registration below (used purely to read
+            // a path) does not carry any task dependency of its own.
             project.tasks.named("preBuild").configure { preBuild ->
                 preBuild.dependsOn(articulateAndroidResIn)
             }
 
-            // PLAN.md §4.5c point 1 names `onVariants` as the resolution
-            // window. Empirically (this plugin's own AndroidWiringFunctionalTest,
-            // "applying both plugin IDs to a single module..."), resolving
-            // articulateAndroidResIncoming SYNCHRONOUSLY inside onVariants
-            // breaks the both-plugins-one-module case specifically -- see
-            // this class's KDoc, "§4.5c correction" section, for the full
-            // account and the exact Gradle/AGP/KGP stack trace. In short: a
-            // *self*-referencing project dependency (i18nProject pointing at
-            // this same module) forces Gradle to observe this project's own
-            // AGP-managed configurations (debugRuntimeElements etc.) as part
-            // of variant-aware attribute matching, and that observation
-            // conflicts with AGP/Kotlin Gradle Plugin's own later mutation of
-            // those same configurations inside their own afterEvaluate-driven
-            // task creation -- a conflict that only exists for a
-            // self-reference, not the ordinary cross-project case.
+            // SECOND AMENDMENT, 2026-08-06 (PLAN.md §4.5c): AGP rejects a
+            // Provider payload in the DSL SourceSet API by design ("You
+            // cannot add Provider instances to the Android SourceSet API ...
+            // use the Sources interface"), and the Sources interface
+            // (addStaticSourceDirectory, this class's previous mechanism --
+            // see the KDoc history above) is exactly what a two-sided human
+            // experiment proved Android Studio's editor model ignores. So
+            // the DSL needs a literal path, resolved eagerly.
             //
-            // Fix, verified against both fixtures (cross-project AND
-            // self-apply): still register the callback via `onVariants` (AGP
-            // requires that -- variants cannot be discovered any other way),
-            // but only COLLECT the variant references there; defer the
-            // actual resolution and `addStaticSourceDirectory` call to
-            // `project.afterEvaluate`, registered here -- i.e. AFTER AGP's
-            // own `BasePlugin.apply()` already registered its own
-            // afterEvaluate task-creation callback (this whole block only
-            // runs once `com.android.application` has already applied), so
-            // afterEvaluate listeners firing in registration order guarantees
-            // AGP/KGP's own configuration mutations for this project complete
-            // BEFORE this one resolves anything. No lenient artifact view: a
-            // resolution failure (missing project; project without
-            // net.sarazan.articulate applied) still throws Gradle's own loud
-            // resolution diagnostics, naming the project path.
-            val collectedVariants = mutableListOf<com.android.build.api.variant.ApplicationVariant>()
-            androidComponents.onVariants { variant -> collectedVariants.add(variant) }
-            project.afterEvaluate {
+            // finalizeDsl is the window because it is (a) after the
+            // consumer's articulateAndroid { i18nProject = ... } block has
+            // already run, (b) still mutable -- that is finalizeDsl's whole
+            // purpose -- and (c) before AGP creates the per-variant
+            // consumable configurations whose consume-marking is what made
+            // the old onVariants-based self-apply resolution explode (see
+            // "§4.5c correction" in the KDoc above): those configurations
+            // cannot be marked "consumed as a variant" if they do not exist
+            // yet. This resolves synchronously, at configuration time, for
+            // ANY requested task (finalizeDsl fires as part of ordinary
+            // project configuration, not only when a task actually consumes
+            // this configuration as a real input) -- exactly the same
+            // resolution-timing shape the previous onVariants/afterEvaluate
+            // mechanisms had, so §4.5c's asymmetry (resolving-for-a-path
+            // alone runs nothing; only preBuild.dependsOn above wires in the
+            // real validateStrings gate) still holds unchanged. No lenient
+            // artifact view: a resolution failure (missing project; project
+            // without net.sarazan.articulate applied) still throws Gradle's
+            // own loud resolution diagnostics, naming the project path. If
+            // resolution succeeds but yields anything other than exactly one
+            // file, this plugin throws its own GradleException naming the
+            // configured i18nProject path and the fix.
+            androidComponents.finalizeDsl {
                 val resolvedFiles = articulateAndroidResIn.files
                 val stringsDir = resolvedFiles.singleOrNull() ?: throw GradleException(
                     "net.sarazan.articulate.android: resolving $ARTICULATE_ANDROID_RES_INCOMING_CONFIGURATION " +
@@ -322,9 +406,7 @@ class ArticulateAndroidPlugin : Plugin<Project> {
                         "Check that '${extension.i18nProject.get()}' applies net.sarazan.articulate, or " +
                         "point articulateAndroid { i18nProject = \":your-i18n-module\" } at the module that does.",
                 )
-                collectedVariants.forEach { variant ->
-                    variant.sources.res?.addStaticSourceDirectory(stringsDir.absolutePath)
-                }
+                androidExtension.sourceSets.getByName("main").res.srcDir(stringsDir.absolutePath)
             }
         }
     }

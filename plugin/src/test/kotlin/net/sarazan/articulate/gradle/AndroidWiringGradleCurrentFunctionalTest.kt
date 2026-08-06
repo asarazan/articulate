@@ -80,7 +80,7 @@ class AndroidWiringGradleCurrentFunctionalTest {
     }
 
     @Test
-    fun `wrapper Gradle -- generated Android res is registered as a static variant source directory and R string resolves it`() {
+    fun `wrapper Gradle -- generated Android res is registered via DSL srcDir at finalizeDsl and R string resolves it`() {
         writeTwoModuleFixture()
 
         val result = gradleCurrentRunner(":app:compileDebugJavaWithJavac", ":app:compileReleaseJavaWithJavac").build()

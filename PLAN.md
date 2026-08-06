@@ -560,7 +560,7 @@ The res defect lives in the Android **app** module, which has no such task, and 
 
 **Why this blocks more than it looks.** The `commonMain` token feature (§14 amendment) will hit the same defect for generated *source*, on the exact API users would be told to call. Fix this first.
 
-Expected fixed by §4.5c (static source registration, 2026-08-03) — awaiting human Studio confirmation; not VERIFIED until a human syncs and says so.
+Expected fixed by §4.5c's SECOND AMENDMENT mechanism (DSL `srcDir` registration at `finalizeDsl`, 2026-08-06) — awaiting human Studio confirmation; not VERIFIED until a human syncs and says so.
 
 ### 4.5b Option 3 — AGP consumes source; `validateStrings` is the gate — SPEC, 2026-08-03
 
