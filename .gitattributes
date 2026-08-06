@@ -1,0 +1,15 @@
+# This is a byte-exact project (PLAN.md §2.1, §5): the golden corpus under
+# core/src/test/resources compares generated output against committed
+# `expected.xcstrings`/`expected-error.txt` fixtures byte for byte, and the
+# committed catalog format itself (indentation, separators, absent trailing
+# newline) is part of the spec, not incidental formatting.
+#
+# Git's default line-ending normalization is therefore actively hostile here.
+# A clone on Windows with `core.autocrlf=true` rewrites every checked-out LF
+# to CRLF, which silently corrupts the fixtures and turns every byte-comparison
+# test into a false failure that has nothing to do with the change being
+# tested. `-text` (not `eol=lf`) is deliberate: the bytes already committed are
+# already correct for every fixture in this repo, and `eol=lf` would rewrite
+# them on top of what's already right -- the rewrite itself is the hazard
+# being prevented, not merely the wrong target for it.
+* -text

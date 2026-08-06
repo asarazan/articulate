@@ -36,17 +36,22 @@ jobs:
   wrapper-validation:
     name: Validate Gradle wrapper
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: gradle/actions/wrapper-validation@v6
 
-  # :core:test -- 203 tests as of 2026-08-01, one of them the parked
-  # RoundTripTest (PLAN.md §D2/§E3 tier 1: unit + golden corpus),
-  # pure Kotlin, zero Gradle API surface (D1), no Android SDK needed.
+  # :core:test -- PLAN.md §D2/§E3 tier 1: unit + golden corpus. Pure Kotlin,
+  # zero Gradle API surface (D1), no Android SDK needed. Test count is
+  # intentionally not pinned in this comment (it drifts as cases are added
+  # or removed, e.g. RoundTripTest since deleted) -- see the job's own run
+  # output, or CorpusTest, for the current count and its guard against
+  # vacuously-passing assertions.
   core-test:
     name: "core:test"
     needs: wrapper-validation
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -72,26 +77,32 @@ jobs:
           if-no-files-found: ignore
 
   # :plugin:test -- PLAN.md §D2/§E3 tier 2 (TestKit functional tests), plus
-  # D9's whole matrix in one invocation:
-  #  - The floor cell (AGP 8.5.2 / Gradle 8.7, compileSdk 34) via
+  # D9's matrix in one invocation. REVISED 2026-08-03 (PLAN.md §E2): the
+  # floor moved to AGP 9.1.0, so both matrix cells now run the *same* AGP --
+  # the matrix's real axis is Gradle version, not AGP:
+  #  - The floor cell (Gradle 9.3.1, downloaded on demand by TestKit) via
   #    GradleFloorFunctionalTest and AndroidWiringFunctionalTest, which pin
-  #    Gradle 8.7 with GradleRunner.withGradleVersion(...).
-  #  - The upper cell (AGP 9.1.0, compileSdk 37, this repo's own wrapper
-  #    9.5.0 which satisfies AGP 9.1's Gradle >= 9.3.1 requirement) via
-  #    AndroidWiringAgp91FunctionalTest, which builds its own explicit
-  #    TestKit plugin classpath (see FunctionalTestSupport.agp91PluginClasspath
-  #    and plugin/build.gradle.kts) rather than using the default one, which
-  #    stays pinned to the floor for every other test.
-  # Both cells need their own SDK platform + build-tools; both are installed
-  # below. ARTICULATE_REQUIRE_ANDROID_SDK=true (Task 1's strictness switch,
-  # PLAN.md §13) turns a missing SDK into a hard failure instead of a silent
-  # skip -- a green run here that quietly skipped every Android test would
-  # have tested nothing, which is exactly the failure mode that env var
-  # exists to convert into a loud one.
+  #    it with GradleRunner.withGradleVersion(ANDROID_GRADLE_FLOOR_VERSION).
+  #  - The current cell (this repo's own wrapper Gradle, 9.5.0) via
+  #    AndroidWiringGradleCurrentFunctionalTest, which runs with no
+  #    .withGradleVersion(...) pin at all so it tracks whatever Gradle
+  #    version actually builds this repo.
+  # A single AGP (9.1.0) and a single compileSdk (37, FunctionalTestSupport.COMPILE_SDK)
+  # serve both cells, so only one SDK platform + build-tools pair is needed
+  # (installed below) -- there used to be a second pair for AGP 8.5.2's
+  # compileSdk-34 ceiling, but nothing here has used AGP 8.5.2 since the
+  # 2026-08-03 revision, so installing platforms;android-34/build-tools;34.0.0
+  # cost minutes per run for a configuration no cell exercises. Dropped.
+  # ARTICULATE_REQUIRE_ANDROID_SDK=true (PLAN.md §13's strictness switch)
+  # turns a missing SDK into a hard failure instead of a silent skip -- a
+  # green run here that quietly skipped every Android test would have tested
+  # nothing, which is exactly the failure mode that env var exists to
+  # convert into a loud one.
   plugin-test:
     name: "plugin:test"
     needs: wrapper-validation
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       ARTICULATE_REQUIRE_ANDROID_SDK: "true"
     steps:
@@ -106,19 +117,13 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          # platforms;android-34 + build-tools;34.0.0: AGP 8.5.2's maximum
-          #   supported compileSdk -- D9's floor cell (PLAN.md §E2). Not a
-          #   preference; a higher compileSdk here would test a
-          #   configuration no floor consumer can actually run.
-          # platforms;android-37.0 + build-tools;36.0.0: AGP 9.1's cell --
-          #   verified against Google's live SDK repository manifest that
-          #   `platforms;android-37.0` (not `platforms;android-37`) is the
-          #   real published package id.
+          # platforms;android-37.0 + build-tools;36.0.0: AGP 9.1's cell (the
+          #   only cell -- see above) -- verified against Google's live SDK
+          #   repository manifest that `platforms;android-37.0` (not
+          #   `platforms;android-37`) is the real published package id.
           packages: >-
             platform-tools
-            platforms;android-34
             platforms;android-37.0
-            build-tools;34.0.0
             build-tools;36.0.0
 
       - name: Set up Gradle
@@ -136,14 +141,248 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  # CI hardening item 1 (PLAN.md, "CI hardening -- SPEC'D 2026-08-06"): CI
+  # never built or validated the publishable artifact -- :core:test and
+  # :plugin:test never run publishToMavenLocal or anything that consumes the
+  # published jar, so the entire publishing configuration (coordinates, POM,
+  # bundled core, marker resolution) was outside CI's reach. This job closes
+  # that gap for everything that doesn't need Portal credentials.
+  #
+  # `:plugin:publishPlugins --validate-only` was evaluated for inclusion here
+  # and deliberately left OUT. Verified locally (2026-08-06) under a scratch
+  # GRADLE_USER_HOME, simulating CI's credential-less environment:
+  #
+  #   GRADLE_USER_HOME=<scratch dir> ./gradlew :plugin:publishPlugins --validate-only
+  #   ...
+  #   > Task :plugin:publishPlugins FAILED
+  #   FAILURE: Build failed with an exception.
+  #   * What went wrong:
+  #   Execution failed for task ':plugin:publishPlugins' (registered by plugin 'com.gradle.plugin-publish').
+  #   > Missing publishing keys. Please set gradle.publish.key/gradle.publish.secret
+  #     system properties or GRADLE_PUBLISH_KEY/GRADLE_PUBLISH_SECRET env variables
+  #     or login using the login task.
+  #
+  # It fails without Portal credentials even in --validate-only mode, so it
+  # cannot run in this (unauthenticated) job. publishToMavenLocal plus the
+  # jar/POM assertions below cover everything --validate-only would have
+  # checked about the artifact shape; the Portal-specific validation only
+  # ever runs for real in release.yml, which has the secrets.
+  publish-check:
+    name: Publish check
+    needs: wrapper-validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Publish to a scratch local repo and assert artifact shape
+        run: |
+          set -euo pipefail
+          M2_SCRATCH="$RUNNER_TEMP/m2-scratch"
+          rm -rf "$M2_SCRATCH"
+          ./gradlew :plugin:publishToMavenLocal "-Dmaven.repo.local=$M2_SCRATCH" --stacktrace
+
+          JAR=$(find "$M2_SCRATCH" -name 'articulate-gradle-plugin-*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar')
+          POM=$(find "$M2_SCRATCH" -name 'articulate-gradle-plugin-*.pom')
+          echo "Fat jar: $JAR"
+          echo "pluginMaven POM: $POM"
+
+          # `core` is bundled into this jar (plugin/build.gradle.kts's
+          # tasks.jar { from(bundledCore) }), never published as its own
+          # artifact (D1/D10). Assert count > 0 and log it -- don't hard-pin
+          # an exact number, since it will drift as core grows.
+          CORE_CLASS_COUNT=$(unzip -l "$JAR" | grep -c 'net/sarazan/articulate/core/.*\.class' || true)
+          echo "Bundled net/sarazan/articulate/core .class entries: $CORE_CLASS_COUNT"
+          if [ "$CORE_CLASS_COUNT" -eq 0 ]; then
+            echo "::error::Fat jar does not bundle any net/sarazan/articulate/core classes"
+            exit 1
+          fi
+
+          # D1/D10's whole point: net.sarazan.articulate:core is compileOnly
+          # + bundled, never a runtime POM dependency -- a non-Android
+          # consumer of the base plugin must never pull core in transitively
+          # (no repository serves it standalone).
+          if grep -qi 'articulate-core' "$POM"; then
+            echo "::error::pluginMaven POM declares an articulate-core dependency"
+            cat "$POM"
+            exit 1
+          fi
+          echo "pluginMaven POM does not depend on articulate-core, as expected."
+
+          # Both plugin-marker POMs (Gradle convention: groupId = plugin id)
+          # must exist -- these are what plugins { id("net.sarazan.articulate") }
+          # and plugins { id("net.sarazan.articulate.android") } actually
+          # resolve against.
+          BASE_MARKER=$(find "$M2_SCRATCH" -path '*net.sarazan.articulate.gradle.plugin*' -name '*.pom')
+          ANDROID_MARKER=$(find "$M2_SCRATCH" -path '*net.sarazan.articulate.android.gradle.plugin*' -name '*.pom')
+          if [ -z "$BASE_MARKER" ]; then
+            echo "::error::net.sarazan.articulate.gradle.plugin marker POM not found"
+            exit 1
+          fi
+          if [ -z "$ANDROID_MARKER" ]; then
+            echo "::error::net.sarazan.articulate.android.gradle.plugin marker POM not found"
+            exit 1
+          fi
+          echo "Base marker POM: $BASE_MARKER"
+          echo "Android marker POM: $ANDROID_MARKER"
+
+      # The config-cache store->reuse check is hand-verified constantly and
+      # owned by nobody (PLAN.md). Automating it here: the first invocation
+      # must store an entry, the second must reuse it -- a regression that
+      # silently disabled configuration-cache reuse for this project's own
+      # build would otherwise only ever be caught by a human happening to
+      # look.
+      - name: Configuration cache is stored, then reused (:plugin:jar)
+        run: |
+          set -euo pipefail
+          rm -rf .gradle/configuration-cache
+          ./gradlew :plugin:jar --configuration-cache --stacktrace | tee "$RUNNER_TEMP/cc-run1.log"
+          if ! grep -q "Configuration cache entry stored" "$RUNNER_TEMP/cc-run1.log"; then
+            echo "::error::First :plugin:jar --configuration-cache run did not report storing an entry"
+            exit 1
+          fi
+
+          ./gradlew :plugin:jar --configuration-cache --stacktrace | tee "$RUNNER_TEMP/cc-run2.log"
+          if ! grep -qi "reused" "$RUNNER_TEMP/cc-run2.log"; then
+            echo "::error::Second :plugin:jar --configuration-cache run did not report reuse"
+            exit 1
+          fi
+          echo "Configuration cache stored on the first run and reused on the second, as expected."
+
+  # CI hardening item 2: prove ARTICULATE_REQUIRE_ANDROID_SDK=true
+  # (PLAN.md §13's strictness switch) still converts a missing Android SDK
+  # into a hard build failure rather than a silent skip -- see
+  # FunctionalTestSupport.resolveRequiredAndroidSdk. Without this job, a
+  # regression in the switch would turn every future Android test run into
+  # a quiet no-op that still reports green.
+  #
+  # This job does NOT use android-actions/setup-android: ubuntu-latest
+  # preinstalls its own Android SDK (the caveat PLAN.md calls out
+  # explicitly), so "unreachable" has to be forced, not assumed.
+  # ANDROID_HOME and ANDROID_SDK_ROOT below are both pointed at a directory
+  # that does not exist.
+  #
+  # Verified locally (2026-08-06) that this is not sufficient on every
+  # machine: FunctionalTestSupport.findAndroidSdk() checks ANDROID_HOME,
+  # then ANDROID_SDK_ROOT, then falls back to a hardcoded
+  # "$HOME/Library/Android/sdk". On a real developer Mac with an SDK
+  # actually installed there, overriding only the two env vars left the
+  # targeted test SUCCEEDING -- the fallback path silently found the real
+  # SDK anyway, defeating the whole point of this job. Confirmed by
+  # temporarily renaming that SDK's platforms/ directory (and restoring it
+  # immediately after) and re-running: only then did the build fail with
+  # FunctionalTestSupport's expected message. ubuntu-latest has no
+  # "$HOME/Library/Android/sdk" (that path is macOS-shaped), so this job's
+  # two env var overrides are sufficient on this runner -- but both are set
+  # deliberately, matching every discovery path the production code has,
+  # not just the ones this specific runner happens to defeat by omission.
+  #
+  # The result is inverted in shell: THIS JOB'S SUCCESS IS THE UNDERLYING
+  # GRADLE BUILD'S FAILURE. That is the red-first principle in CI form --
+  # a job that passes when the build fails.
+  sdk-strictness-guard:
+    name: SDK strictness guard
+    needs: wrapper-validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ARTICULATE_REQUIRE_ANDROID_SDK: "true"
+      ANDROID_HOME: /opt/articulate-ci/nonexistent-android-sdk
+      ANDROID_SDK_ROOT: /opt/articulate-ci/nonexistent-android-sdk
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run Android functional tests with an unreachable SDK, and invert the result
+        run: |
+          set +e
+          ./gradlew :plugin:test --tests '*AndroidWiring*' --stacktrace
+          RESULT=$?
+          set -e
+          if [ "$RESULT" -eq 0 ]; then
+            echo "::error::sdk-strictness-guard FAILED: the Android functional tests SUCCEEDED with ANDROID_HOME/ANDROID_SDK_ROOT pointed at a nonexistent directory and ARTICULATE_REQUIRE_ANDROID_SDK=true set. FunctionalTestSupport.resolveRequiredAndroidSdk is no longer converting a missing SDK into a hard failure -- it silently found an SDK somewhere, or silently skipped. This is a regression in the strictness switch itself, not a passing test."
+            exit 1
+          fi
+          echo "Build failed as expected (exit $RESULT) -- the strictness switch still bites."
+
+      - name: Upload SDK-strictness test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdk-strictness-guard-report
+          path: plugin/build/reports/tests/test
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # CI hardening item 3: the exact path a human walks -- the sample's OWN
+  # wrapper, invoked directly -- which none of the jobs above exercise.
+  # TestKit (plugin-test) injects the plugin classpath in-process; it never
+  # runs a real, separately-wrappered composite build the way a cloned
+  # sample does. Three defects in one week lived exactly in that gap
+  # (missing wrapper; an empty IDE module; editor-blind DSL registration --
+  # PLAN.md's "same shape recurred" notes). This job also dogfoods
+  # `verifyStrings` in CI, which the README instructs every consumer to run.
+  sample-human-path:
+    name: Sample human path
+    needs: wrapper-validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-37.0
+            build-tools;36.0.0
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      # Only the sample's own wrapper -- never the root repo's -- and no
+      # includeBuild override: sample/settings.gradle.kts already does
+      # includeBuild("..") against this checkout, so this is exactly what a
+      # human running `git clone && cd sample && ./gradlew assembleDebug`
+      # would do.
+      - name: Build the sample via its own wrapper
+        run: |
+          cd sample
+          ./gradlew assembleDebug :i18n:verifyStrings --stacktrace
+
   # Single required status check for branch protection: green only if every
   # job above actually succeeded (not merely "didn't error"), so a
   # skipped/cancelled job can't masquerade as passing CI.
   ci:
     name: CI
     if: always()
-    needs: [wrapper-validation, core-test, plugin-test]
+    needs: [wrapper-validation, core-test, plugin-test, publish-check, sdk-strictness-guard, sample-human-path]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Require all jobs to have succeeded
         run: |

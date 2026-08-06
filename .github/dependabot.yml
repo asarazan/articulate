@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # Gradle wrapper + build-script dependency versions (libs.versions.toml,
+  # plugin/build.gradle.kts, core/build.gradle.kts, the wrapper itself).
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Actions referenced from .github/workflows/*.yml (actions/checkout,
+  # actions/setup-java, gradle/actions/*, android-actions/setup-android,
+  # actions/upload-artifact, etc.) -- pinned by major version (@v7, @v6, ...)
+  # in this repo, so Dependabot's updates land as ordinary version-bump PRs
+  # rather than silently drifting.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

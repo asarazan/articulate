@@ -1,0 +1,144 @@
+name: Release
+
+# CI hardening item 6 (PLAN.md, "CI hardening -- SPEC'D 2026-08-06"). This is
+# the workflow that actually publishes to the Gradle Plugin Portal --
+# distinct from ci.yml's publish-check job, which only proves the artifact
+# is *shaped* correctly (publishToMavenLocal + assertions) and deliberately
+# never touches the Portal, since it has no credentials to do so.
+#
+# workflow_dispatch only -- no tag trigger. PLAN.md is explicit that there is
+# no tag trigger "for the first release": a push-triggered publish would fire
+# on the very first tag pushed for reasons unrelated to wanting to publish
+# (e.g. testing the tagging convention itself), and a bad publish to the
+# Portal is effectively permanent (published coordinates are immutable, see
+# plugin/build.gradle.kts). Manual dispatch, with an explicit confirmation
+# input below, is the deliberately higher-friction choice.
+#
+# Sequencing (PLAN.md): push and watch ci.yml go green BEFORE ever running
+# this workflow. This workflow does not depend on ci.yml having run -- GitHub
+# Actions has no built-in "only after workflow X is green" gate for
+# workflow_dispatch -- so that ordering is a human responsibility, not
+# something this file can enforce. It re-runs the full test suite itself
+# below as the one automated safeguard it can provide.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm you want to publish to the Gradle Plugin Portal. This is irreversible -- published coordinates cannot be unpublished or overwritten.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  # Fails fast and loudly if the confirmation phrase doesn't match exactly,
+  # before any checkout, build, or credential is touched. A typo'd
+  # workflow_dispatch input (or a well-meaning "yes"/"true"/"confirm") must
+  # not be treated as consent to publish.
+  confirm:
+    name: Confirm publish intent
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require the literal confirmation phrase
+        run: |
+          if [ "${{ inputs.confirm }}" != "publish" ]; then
+            echo "::error::Confirmation input was '${{ inputs.confirm }}', not the required literal 'publish'. Re-run this workflow and type exactly: publish"
+            exit 1
+          fi
+          echo "Confirmed."
+
+  # The full suite, unconditionally, immediately before publishing --
+  # separate from (and in addition to) whatever state ci.yml left behind,
+  # since nothing ties this workflow_dispatch run to a specific green ci.yml
+  # run. A red test here must block the publish step below from ever
+  # starting.
+  test:
+    name: Full test suite
+    needs: confirm
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ARTICULATE_REQUIRE_ANDROID_SDK: "true"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-37.0
+            build-tools;36.0.0
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run the full test suite
+        run: ./gradlew test --stacktrace
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-test-reports
+          path: |
+            core/build/reports/tests/test
+            plugin/build/reports/tests/test
+          retention-days: 7
+          if-no-files-found: ignore
+
+  publish:
+    name: Publish to the Gradle Plugin Portal
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      # First step, before any build work: fail loudly and specifically if
+      # either secret is absent, rather than letting publishPlugins fail
+      # deep into the task graph with a generic Portal-side error (or,
+      # worse, half-publishing one plugin marker before failing on the
+      # second). Names the exact secrets a human needs to create.
+      - name: Verify publishing credentials are configured
+        env:
+          GRADLE_PUBLISH_KEY: ${{ secrets.GRADLE_PUBLISH_KEY }}
+          GRADLE_PUBLISH_SECRET: ${{ secrets.GRADLE_PUBLISH_SECRET }}
+        run: |
+          MISSING=""
+          if [ -z "$GRADLE_PUBLISH_KEY" ]; then
+            MISSING="$MISSING GRADLE_PUBLISH_KEY"
+          fi
+          if [ -z "$GRADLE_PUBLISH_SECRET" ]; then
+            MISSING="$MISSING GRADLE_PUBLISH_SECRET"
+          fi
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing repository secret(s):$MISSING. Create them under Settings > Secrets and variables > Actions before running this workflow -- see https://plugins.gradle.org/docs/publish-plugin for how to obtain a Plugin Portal API key/secret pair."
+            exit 1
+          fi
+          echo "Publishing credentials are present."
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Publish to the Gradle Plugin Portal
+        run: |
+          ./gradlew :plugin:publishPlugins \
+            -Pgradle.publish.key=${{ secrets.GRADLE_PUBLISH_KEY }} \
+            -Pgradle.publish.secret=${{ secrets.GRADLE_PUBLISH_SECRET }} \
+            --stacktrace

@@ -1,5 +1,7 @@
 # Articulate
 
+[![CI](https://github.com/asarazan/articulate/actions/workflows/ci.yml/badge.svg)](https://github.com/asarazan/articulate/actions/workflows/ci.yml)
+
 Author your app's copy once, as Android `strings.xml`. Get a real Xcode String Catalog out.
 
 Articulate is a Gradle plugin that converts Android string resources into `.xcstrings`, so a
