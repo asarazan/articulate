@@ -322,9 +322,17 @@ class GenerateTasksFunctionalTest {
      * presentation-only companion file must not make `validateStrings` (the
      * task that replaced `generateAndroidRes`'s validation role) error, and
      * must not leak into the generated catalog as a spurious key.
+     *
+     * **Extended for the 2026-08-03 ruling** (PLAN.md §4.3's amended table
+     * row, §4.5c, CONVERSIONS.md K8): a presentation-only companion file is
+     * no longer *silently* passed over -- it must still succeed (warning is
+     * not error), but the build output must now carry a warning naming
+     * `colors.xml` and the Android-ships/iOS-ignores asymmetry, through the
+     * same [net.sarazan.articulate.core.diagnostics.Diagnostic] channel
+     * `--info` already surfaces for other diagnostics in this file.
      */
     @Test
-    fun `a presentation-only companion file like colors xml does not fail validateStrings or leak into the catalog`() {
+    fun `a presentation-only companion file like colors xml does not fail validateStrings or leak into the catalog, but warns`() {
         File(projectDir.toFile(), "src/main/strings/values/colors.xml").writeText(
             """
             <resources>
@@ -333,7 +341,7 @@ class GenerateTasksFunctionalTest {
             """.trimIndent(),
         )
 
-        val result = runner(projectDir, "generateStrings").build()
+        val result = runner(projectDir, "generateStrings", "--info").build()
         assertEquals(TaskOutcome.SUCCESS, result.task(":validateStrings")!!.outcome)
         assertEquals(TaskOutcome.SUCCESS, result.task(":generateXcstrings")!!.outcome)
 
@@ -343,5 +351,37 @@ class GenerateTasksFunctionalTest {
             catalogText.contains("colorPrimary"),
             "colors.xml is presentation-only and must never leak into the generated catalog as a key",
         )
+
+        assertTrue(
+            result.output.contains("colors.xml") && result.output.contains("ignored entirely on iOS"),
+            "expected the presentation-file warning to name colors.xml and state the Android-ships/" +
+                "iOS-ignores asymmetry:\n${result.output}",
+        )
+    }
+
+    /**
+     * The promotion half of the 2026-08-03 ruling: `warningsAsErrors = true`
+     * must turn the same presentation-file warning into a build failure that
+     * names `colors.xml`, exactly like every other diagnostic PLAN.md §4.7
+     * already promotes.
+     */
+    @Test
+    fun `warningsAsErrors promotes the presentation-file warning for colors xml to a build failure`() {
+        writeBaseBuildFile(projectDir, extraConfig = "warningsAsErrors = true")
+        File(projectDir.toFile(), "src/main/strings/values/colors.xml").writeText(
+            """
+            <resources>
+                <color name="colorPrimary">#FFFFFF</color>
+            </resources>
+            """.trimIndent(),
+        )
+
+        val result = runner(projectDir, "generateStrings").buildAndFail()
+
+        assertTrue(
+            result.output.contains("warningsAsErrors") && result.output.contains("colors.xml"),
+            "expected the failure to name warningsAsErrors and colors.xml:\n${result.output}",
+        )
+        assertFalse(result.output.contains("BUILD SUCCESSFUL"))
     }
 }

@@ -20,8 +20,12 @@ import java.io.File
 /**
  * The result of [AndroidToXcstringsConverter.convert]: the merged catalog
  * plus every non-fatal finding collected along the way, per PLAN.md §2.7.
- * [diagnostics] is ordered: locale directories in the same sorted order
- * `convert` reads them in, document order within each file.
+ * [diagnostics] is ordered: first, one warning per presentation-only
+ * companion file found during directory discovery (§4.3/§4.5c, sorted by
+ * values directory then file name -- see
+ * [AndroidToXcstringsConverter.discoverLocaleDirectories]); then locale
+ * directories in the same sorted order `convert` reads them in, document
+ * order within each file.
  */
 data class ConversionResult(
     val catalog: StringCatalog,
@@ -59,7 +63,8 @@ object AndroidToXcstringsConverter {
         sourceLanguage: String = "en",
         localeOverrides: Map<String, String> = emptyMap(),
     ): ConversionResult {
-        val localeDirs = discoverLocaleDirectories(inputDir).map { dir -> dir to File(dir, "strings.xml") }
+        val (qualifyingDirs, discoveryDiagnostics) = discoverLocaleDirectories(inputDir)
+        val localeDirs = qualifyingDirs.map { dir -> dir to File(dir, "strings.xml") }
 
         val mapped: List<Triple<LocaleTag, File, File>> = localeDirs.map { (dir, xml) ->
             val tag = try {
@@ -104,7 +109,7 @@ object AndroidToXcstringsConverter {
             entries[StringKey(name)] = buildEntry(name, sourceResource, sourceTag, localeFiles)
         }
 
-        val diagnostics = localeFiles.flatMap { it.second.diagnostics }
+        val diagnostics = discoveryDiagnostics + localeFiles.flatMap { it.second.diagnostics }
         return ConversionResult(StringCatalog(sourceLanguage = sourceLanguage, entries = entries), diagnostics)
     }
 
@@ -115,8 +120,10 @@ object AndroidToXcstringsConverter {
      * which throws if any of them declares localizable content under a name
      * other than `strings.xml` (the original silent-loss bug this guards
      * against: discovery hardcoded to `strings.xml` silently dropped
-     * `plurals.xml`/`arrays.xml` split files), and silently accepts genuine
-     * presentation resources (`colors.xml`, `dimens.xml`, ...).
+     * `plurals.xml`/`arrays.xml` split files), and returns a [Diagnostic]
+     * warning for genuine presentation resources (`colors.xml`,
+     * `dimens.xml`, ...) -- RULED 2026-08-03: no longer silently accepted,
+     * see [ValuesFileClassifier].
      *
      * Classification runs over *every* `values`/`values-<tag>` directory,
      * not only ones that happen to contain a `strings.xml` -- a directory
@@ -124,27 +131,34 @@ object AndroidToXcstringsConverter {
      * caught, rather than silently skipped the way "no strings.xml here"
      * used to skip it.
      *
-     * Exposed (not `private`) so callers outside this function -- chiefly
-     * `GenerateAndroidResTask` in `plugin`, which copies each
-     * already-validated `strings.xml` byte-for-byte into a disposable
-     * output tree -- delegate here instead of re-deriving this list
-     * themselves. Reimplementing this filter independently, without the
-     * classification step, is exactly how the original bug happened:
-     * `GenerateAndroidResTask` filtered for `strings.xml` on its own and
-     * silently copied nothing else.
+     * Returns the qualifying locale directories (those with a `strings.xml`)
+     * paired with every presentation-file [Diagnostic] collected along the
+     * way, so [convert] can fold them into [ConversionResult.diagnostics]
+     * without a second pass over the tree.
+     *
+     * Exposed (not `private`) so callers outside this function could
+     * delegate here instead of re-deriving this list themselves --
+     * `GenerateAndroidResTask` in `plugin` used to (deleted by §4.5b/c, the
+     * strings tree is now registered as a res root directly, nothing is
+     * copied). Reimplementing this filter independently, without the
+     * classification step, is exactly how the original bug happened: that
+     * task filtered for `strings.xml` on its own and silently copied
+     * nothing else.
      */
-    fun discoverLocaleDirectories(inputDir: File): List<File> {
+    fun discoverLocaleDirectories(inputDir: File): Pair<List<File>, List<Diagnostic>> {
         val valuesDirs = inputDir.listFiles { f -> f.isDirectory }.orEmpty()
             .sortedBy { it.name }
             .filter { it.name == "values" || it.name.startsWith("values-") }
 
+        val diagnostics = mutableListOf<Diagnostic>()
         for (dir in valuesDirs) {
             dir.listFiles { f -> f.isFile && f.name != "strings.xml" && f.extension == "xml" }.orEmpty()
                 .sortedBy { it.name }
-                .forEach(ValuesFileClassifier::checkNotLocalizable)
+                .forEach { file -> diagnostics += ValuesFileClassifier.checkNotLocalizable(file) }
         }
 
-        return valuesDirs.filter { File(it, "strings.xml").isFile }
+        val qualifying = valuesDirs.filter { File(it, "strings.xml").isFile }
+        return qualifying to diagnostics
     }
 
     /**

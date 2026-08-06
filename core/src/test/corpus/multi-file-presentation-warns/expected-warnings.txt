@@ -1,0 +1,4 @@
+colors.xml declares only
+ships into the Android app's merged resources
+ignored entirely on iOS
+Android res directory the app owns

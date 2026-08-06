@@ -123,39 +123,51 @@ internal object AndroidStringsParser {
                         // `<item type="...">` is Android's generic declaration form and
                         // is NOT interchangeable across types -- each branch below is
                         // what aapt2 actually produced, not what the docs imply.
-                        "item" -> when (reader.getAttributeValue(null, "type")) {
-                            // Compiles to a `string` resource indistinguishable from
-                            // `<string>`. Previously skipped, so ordinary translatable
-                            // copy went missing with verifyStrings green -- it never
-                            // knew the key existed.
-                            "string" -> {
-                                val resource = parseStringElement(
-                                    reader, flattener, filePath, position, commentForThisElement, diagnostics,
-                                    elementName = "item",
-                                )
-                                checkDuplicate(seenNames, resource.name, position, filePath)
-                                resources += resource
+                        "item" -> {
+                            val itemType = reader.getAttributeValue(null, "type")
+                            when (itemType) {
+                                // Compiles to a `string` resource indistinguishable from
+                                // `<string>`. Previously skipped, so ordinary translatable
+                                // copy went missing with verifyStrings green -- it never
+                                // knew the key existed.
+                                "string" -> {
+                                    val resource = parseStringElement(
+                                        reader, flattener, filePath, position, commentForThisElement, diagnostics,
+                                        elementName = "item",
+                                    )
+                                    checkDuplicate(seenNames, resource.name, position, filePath)
+                                    resources += resource
+                                }
+
+                                "array" -> throw arrayNotSupported(reader, position, "<item type=\"array\">")
+
+                                "plurals" -> {
+                                    val name = reader.getAttributeValue(null, "name") ?: "<unnamed>"
+                                    throw ConversionException(
+                                        position,
+                                        name,
+                                        "<item type=\"plurals\"> does not declare a plurals resource. Android " +
+                                            "compiles it to a *styled string* -- the nested <item quantity=\"...\"> " +
+                                            "elements become markup spans, not quantity variants, so '$name' is " +
+                                            "already broken on Android itself and would be wrong on iOS too. " +
+                                            "Use <plurals name=\"$name\"> instead.",
+                                    )
+                                }
+
+                                // Every other type (color, dimen, bool, integer, style...)
+                                // is a presentation resource, genuinely not ours -- same
+                                // rule the multi-file check applies (§4.3). RULED
+                                // 2026-08-03 (CONVERSIONS.md K8): warn, do not silently
+                                // skip. The parsed strings.xml ships to Android wholesale
+                                // (§4.5c registers it as a res root directly), so a
+                                // presentation entry inside it is a one-platform resource;
+                                // iOS's .xcstrings never sees it.
+                                else -> {
+                                    val name = reader.getAttributeValue(null, "name") ?: "<unnamed>"
+                                    diagnostics += presentationItemWarning(filePath, itemType, name, position)
+                                    skipElement(reader)
+                                }
                             }
-
-                            "array" -> throw arrayNotSupported(reader, position, "<item type=\"array\">")
-
-                            "plurals" -> {
-                                val name = reader.getAttributeValue(null, "name") ?: "<unnamed>"
-                                throw ConversionException(
-                                    position,
-                                    name,
-                                    "<item type=\"plurals\"> does not declare a plurals resource. Android " +
-                                        "compiles it to a *styled string* -- the nested <item quantity=\"...\"> " +
-                                        "elements become markup spans, not quantity variants, so '$name' is " +
-                                        "already broken on Android itself and would be wrong on iOS too. " +
-                                        "Use <plurals name=\"$name\"> instead.",
-                                )
-                            }
-
-                            // Every other type (color, dimen, bool, integer, style...)
-                            // is a presentation resource and genuinely not ours --
-                            // same rule the multi-file check applies (§4.3).
-                            else -> skipElement(reader)
                         }
 
                         else -> skipElement(reader)
@@ -389,6 +401,31 @@ internal object AndroidStringsParser {
                 "usable from a key, so this key will not produce a usable generated symbol on " +
                 "either platform. The key is still accepted; consider renaming it to use only " +
                 "ASCII letters, digits, and '_'.",
+        )
+    }
+
+    /**
+     * K8's amended `<item type="color|bool|dimen|integer|...">` row (RULED
+     * 2026-08-03): the type isn't `string`, `array`, or `plurals`, so
+     * [ContentFlattener] never even sees this element -- it is a
+     * presentation resource embedded inside a `strings.xml` that otherwise
+     * carries real content. [itemType] may be `null` if the `<item>` omits
+     * `type` entirely; that malformed-but-still-not-ours case gets the same
+     * warning rather than a separate error, since aapt2 also does not
+     * reject it outright.
+     */
+    private fun presentationItemWarning(filePath: String, itemType: String?, name: String, position: XmlPosition): Diagnostic {
+        val typeDescription = itemType ?: "<unspecified>"
+        return Diagnostic(
+            Severity.WARNING,
+            position,
+            name,
+            "<item type=\"$typeDescription\" name=\"$name\"> in $filePath is a presentation resource, " +
+                "not a string -- because the strings tree is registered directly as an Android res " +
+                "root (PLAN.md §4.5c), it ships into the app's merged Android resources (e.g. " +
+                "R.$typeDescription.$name) but iOS ignores it entirely, since .xcstrings holds only " +
+                "strings: key '$name' is a one-platform resource in a tree meant to be shared. Move " +
+                "it to an Android res directory the app owns, or leave it here if that is deliberate.",
         )
     }
 

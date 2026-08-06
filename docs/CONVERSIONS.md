@@ -1084,13 +1084,17 @@ do not drop)* · `error-duplicate-key` · `error-orphan-key` · `error-bad-key` 
 
 Added 2026-08-01 by K8 (declaration form vs resource type), all five oracle-derived:
 
-**Declaration forms** `item-type-string` · `item-type-nonstring-ignored` ·
+**Declaration forms** `item-type-string` · `item-type-nonstring-warns` (named
+`item-type-nonstring-ignored` at the time this note was written; renamed 2026-08-03 when K8's
+row below was amended from silent-ignore to warn, since "ignored" was no longer accurate) ·
 `error-generic-array-element` · `error-item-declaring-array` · `error-item-declaring-quantities`
 
 Four of the five were confirmed red before the fix by making the new parser branches unreachable.
-`item-type-nonstring-ignored` deliberately passes both ways — it pins *pre-existing* skip behavior
-so a future over-eager rule cannot start erroring on `<item type="color">`; it was separately proven
-capable of failing by mutating that branch to throw.
+`item-type-nonstring-warns` deliberately passed both ways at the time — it pinned *pre-existing*
+skip behavior so a future over-eager rule could not start erroring on `<item type="color">`
+unnoticed; it was separately proven capable of failing by mutating that branch to throw. Since the
+2026-08-03 ruling below, the case pins the warning instead and is proven capable of failing by
+mutating the warning's emission away (see the milestone's mutation record).
 
 New cases this research requires (49):
 

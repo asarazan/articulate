@@ -1,5 +1,7 @@
 package net.sarazan.articulate.core.parse
 
+import net.sarazan.articulate.core.diagnostics.Diagnostic
+import net.sarazan.articulate.core.diagnostics.Severity
 import java.io.File
 import javax.xml.stream.XMLInputFactory
 import javax.xml.stream.XMLStreamConstants
@@ -9,7 +11,7 @@ import javax.xml.stream.XMLStreamReader
 /**
  * PLAN.md §4.3: classifies a `*.xml` file found in a `values`/`values-<tag>`
  * directory *other than* `strings.xml` as either "presentation resource,
- * silently ignore" or "carries localizable content, not yet supported."
+ * warn" or "carries localizable content, not yet supported."
  *
  * **Content-keyed, not filename-keyed.** What matters is which elements the
  * file declares at the top level of its `<resources>` root, not what the
@@ -25,7 +27,12 @@ import javax.xml.stream.XMLStreamReader
  * `strings.xml` produces, so silently skipping them here is exactly the
  * silent-loss bug this classifier exists to close. Everything else
  * (`<color>`, `<dimen>`, `<style>`, `<bool>`, `<integer>`, `<item>`, ...) is
- * presentation and is silently ignored -- genuinely not this tool's concern.
+ * presentation -- **RULED 2026-08-03 (PLAN.md §4.3, §4.5c; CONVERSIONS.md
+ * K8): warn, do not silently ignore.** §4.5c registers `stringsDir` directly
+ * as an Android res root, so such a file now ships into the app's merged
+ * Android resources while remaining completely invisible on iOS -- a
+ * one-platform resource sitting in a tree meant to be shared. The warning
+ * names the file, states that asymmetry, and gives the fix.
  *
  * **Deliberately the detection half only** of full multi-file support
  * (§4.3). Once a file is known to carry localizable content, actually
@@ -49,11 +56,13 @@ internal object ValuesFileClassifier {
     /**
      * Scans [file] and throws [ConversionException] if it declares any
      * localizable content at the top level of its `<resources>` root.
-     * Returns normally for a presentation-only (or otherwise irrelevant)
-     * file -- the caller silently moves on.
+     * Returns a [Diagnostic] warning for a presentation-only (or otherwise
+     * irrelevant) file -- the caller collects it into [ConversionResult]'s
+     * diagnostics; it is never silently dropped (RULED 2026-08-03).
      */
-    fun checkNotLocalizable(file: File) {
+    fun checkNotLocalizable(file: File): Diagnostic {
         val found = linkedMapOf<String, MutableList<String?>>()
+        val otherTopLevelElements = linkedSetOf<String>()
         try {
             file.inputStream().use { input ->
                 val factory = XMLInputFactory.newFactory().apply {
@@ -62,7 +71,7 @@ internal object ValuesFileClassifier {
                 }
                 val reader = factory.createXMLStreamReader(input)
                 try {
-                    scan(reader, file.path, found)
+                    scan(reader, file.path, found, otherTopLevelElements)
                 } finally {
                     reader.close()
                 }
@@ -80,6 +89,34 @@ internal object ValuesFileClassifier {
         }
 
         if (found.isNotEmpty()) reportUnsupportedContent(file, found)
+        return presentationFileWarning(file, otherTopLevelElements)
+    }
+
+    /**
+     * PLAN.md §4.3's amended table row / §4.5c's ruling: a file the scan
+     * proved has no localizable content still gets a warning, because it
+     * ships into the app's merged Android resources (the strings tree is a
+     * registered res root, §4.5c) while iOS never sees it -- `.xcstrings`
+     * holds only strings. Names the file and, when there is one, what it
+     * declares; states the platform asymmetry; gives the fix.
+     */
+    private fun presentationFileWarning(file: File, otherTopLevelElements: Set<String>): Diagnostic {
+        val description = if (otherTopLevelElements.isEmpty()) {
+            "no top-level resource elements"
+        } else {
+            otherTopLevelElements.joinToString(", ") { "<$it>" }
+        }
+        return Diagnostic(
+            Severity.WARNING,
+            XmlPosition(file.path, -1, -1),
+            null,
+            "${file.path} declares only presentation resources ($description) -- because the " +
+                "strings tree is registered directly as an Android res root (PLAN.md §4.5c), this " +
+                "file ships into the Android app's merged resources but is ignored entirely on iOS: " +
+                "a one-platform resource sitting in a tree meant to be shared between both " +
+                "platforms. Move it to an Android res directory the app owns, or keep it here if " +
+                "that is deliberate.",
+        )
     }
 
     /** StAX prefixes its messages with a multi-line `ParseError at [row,col]` banner; drop it (mirrors [AndroidStringsParser]). */
@@ -89,11 +126,17 @@ internal object ValuesFileClassifier {
     /**
      * Walks the direct children of `<resources>`, recording every one whose
      * local name is in [CONTENT_ELEMENTS] (name attribute included, for a
-     * useful error message) and skipping over everything else -- including
-     * the subtree of a recorded content element, since only its presence at
-     * the top level matters here, not its contents.
+     * useful error message) into [found], and every other top-level local
+     * name into [otherTopLevelElements] (for the presentation-file warning's
+     * description) -- skipping the subtree either way, since only presence
+     * at the top level matters here, not contents.
      */
-    private fun scan(reader: XMLStreamReader, filePath: String, found: MutableMap<String, MutableList<String?>>) {
+    private fun scan(
+        reader: XMLStreamReader,
+        filePath: String,
+        found: MutableMap<String, MutableList<String?>>,
+        otherTopLevelElements: MutableSet<String>,
+    ) {
         while (reader.hasNext() && reader.eventType != XMLStreamConstants.START_ELEMENT) {
             reader.next()
         }
@@ -112,6 +155,8 @@ internal object ValuesFileClassifier {
                     val local = reader.localName
                     if (local in CONTENT_ELEMENTS) {
                         found.getOrPut(local) { mutableListOf() }.add(reader.getAttributeValue(null, "name"))
+                    } else {
+                        otherTopLevelElements += local
                     }
                     skipElement(reader)
                 }

@@ -1,0 +1,11 @@
+key 'brand'
+R.color.brand
+key 'feature_on'
+R.bool.feature_on
+key 'gutter'
+R.dimen.gutter
+key 'max_retries'
+R.integer.max_retries
+strings.xml is a presentation resource, not a string
+ships into the app's merged Android resources
+iOS ignores it entirely
