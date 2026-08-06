@@ -608,6 +608,20 @@ The shipped shape is therefore: collect in `onVariants`, register in `afterEvalu
 
 **RULED 2026-08-03: warn** (see §4.3's amended table row and CONVERSIONS.md K8 for the exact behavior). Original statement of the problem kept below. — With the source tree registered directly as a res root, a `colors.xml`/`dimens.xml` sitting beside `strings.xml` in `stringsDir` now reaches the app's merged resources (`R.color.colorPrimary` compiles from the app; observed, and pinned by test as observed behavior, not as endorsed behavior). Under §4.5b's selective copy they were filtered out. `.DS_Store` is ignored by AGP's own merger. This matters most for §4.3's "point `stringsDir` at a real `res/`" adoption path, where such files are guaranteed present — and where the same tree may now be registered as a res root twice (once by the app itself, once via Articulate). Options when ruled: accept and document (Android-only convenience, iOS still ignores them); have `validateStrings` warn; or hard-error non-strings XML in `stringsDir` (would break the real-res adoption path). Not ruled here.
 
+**SECOND AMENDMENT 2026-08-06 — the registration mechanism changes again, and this time each candidate carries evidence:**
+
+| Mechanism | Build | Studio editor model |
+|---|---|---|
+| `addStaticSourceDirectory` (Variant API, shipped by §4.5c) | ✅ whole matrix | ❌ **proven blind by a two-sided human experiment**: `R.string` red on this alone; resolved the instant the same directory was added via the DSL consumer-side; red again when that line was removed |
+| DSL `srcDir(Provider { … })` (lazy payload) | ❌ **rejected by AGP by design**: *"You cannot add Provider instances to the Android SourceSet API … use the Sources interface"* — 14 test failures | n/a |
+| DSL `srcDir(<literal path>)` resolved eagerly in **`finalizeDsl`** | ✅ **250/0/0, whole matrix** — including both-plugins-one-module, isolated projects, CC reuse, and the red-first gate | *expected* ✅ — the consumer experiment proves the DSL API reaches the model; **unestablished** whether finalizeDsl-time additions do (see below) |
+
+**Why `finalizeDsl` is the window:** it runs (a) after the consumer's `articulateAndroid { i18nProject = … }` block, so the extension value is real; (b) while the DSL is still mutable — that is the callback's entire purpose; and (c) before AGP creates the per-variant consumable configurations whose consume-marking made self-apply resolution explode inside `onVariants` — they cannot be consumed-as-variant if they do not exist yet. The `preBuild.dependsOn(<Configuration>)` gate is unchanged and its red-first test still passes.
+
+**Ruled implementation:** resolve eagerly in `finalizeDsl`, register via `sourceSets["main"].res.srcDir(path)`, delete `addStaticSourceDirectory` and the `onVariants` variant-collection entirely (one mechanism, one registration). Prototype verified 2026-08-06 (`/tmp/AAP-prototype-v2-VERIFIED.kt` at the time; the diff is the spec's reference implementation).
+
+**What the prototype could NOT establish:** whether Studio's sync model reads DSL source-set additions made at `finalizeDsl` time — the consumer experiment added its line at script-evaluation time, an earlier window. That is the residual risk, answerable only by the human sync. If it fails, the documented fallback is the consumer one-liner, which is proven.
+
 **What remains human, recorded not glossed:** Studio rendering. After this lands, a clean sync should resolve `R.string` with no build, because the registered path is the always-on-disk source tree. §4.5's open-defect entry gets amended to "expected fixed by §4.5c, awaiting human Studio confirmation" — it is not VERIFIED until a human syncs and says so.
 
 ### 4.6 Configuration-cache rules — non-negotiable, and the reason M4's audit is Opus
