@@ -649,7 +649,7 @@ reading of the docs — the docs describe none of it.
 | `<item type="array" name="x">` | `array/x` `(styled string) " p q "` — malformed | **hard error** |
 | `<item type="plurals" name="x">` | `plurals/x` `(styled string) " %1$d thing %1$d things " item;quantity=one:1,10` — malformed | **hard error, message explains the malformation** |
 | `<plurals name="real">` *(control)* | `plurals/real` `(plurals) size=2` `one=…` `other=…` | parse |
-| `<item type="color\|bool\|dimen\|integer">` | `color/…`, `bool/…`, … | silently ignore |
+| `<item type="color\|bool\|dimen\|integer">` | `color/…`, `bool/…`, … | **warn** — RULED 2026-08-03 (was: silently ignore). Under §4.5c the parsed `strings.xml` ships to Android wholesale, so a presentation entry inside it is a one-platform resource; the warning names the file and the key, states the Android-only asymmetry, and gives the fix. `warningsAsErrors` promotes it |
 | `<item type="string-array">` | **rejected by aapt2**: `error: unknown resource type 'string-array'` | n/a — the form does not exist |
 
 `[EXP-aapt2]` for every row.
