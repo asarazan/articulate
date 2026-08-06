@@ -8,8 +8,9 @@ platform giving up its native localization story. Android reads `R.string` as it
 reads a committed `.xcstrings` that Xcode treats as its own. No runtime, no SDK, no lookup layer on
 either side.
 
-> **Status: v0, unpublished.** The conversion is complete and heavily verified; the plugin is not on
-> the Gradle Plugin Portal yet. See [Maturity](#maturity) for what that means in practice.
+> **Status: v0.** Feature-complete and heavily verified — 250 tests, differential testing against
+> real `aapt2` and `xcstringstool`, and IDE resolution human-verified in Android Studio. See
+> [Maturity](#maturity) for the honest accounting of what is and isn't built.
 
 ## Why this rather than a spreadsheet and a script
 
@@ -157,8 +158,8 @@ Honest accounting, since this is a v0:
   implemented — setting either fails the build loudly rather than silently misbehaving. The Swift
   key-parity lint (M6) is not built. SwiftPM standalone builds have a real limitation, documented in
   [`docs/swiftpm.md`](docs/swiftpm.md).
-- **Not yet published.** Claiming the Plugin Portal namespace is pending, so the coordinates above
-  do not resolve yet.
+- **Publication.** Namespace and credentials are in place; if the coordinates above do not resolve
+  yet, the first Portal release is still in flight.
 
 ## Documentation
 

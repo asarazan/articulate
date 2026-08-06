@@ -529,7 +529,7 @@ Reproduction that is known to fail today is recorded in §13.
 
 **Try the checked-in sample as the regression vehicle first.** §14's sample already needs per-module `plugins {}` blocks to be realistic, and a composite build (`includeBuild("..")`) may produce the same distinct-classloader split as a published artifact — in which case one artifact serves as demo, integration test, and regression test at once. Verify it actually reproduces the failure before relying on it; fall back to publishing into a build-local repository if it does not.
 
-#### IDE visibility of generated Android res — OPEN DEFECT, diagnosed 2026-08-03, three fixes attempted and reverted
+#### IDE visibility of generated Android res — **CLOSED, VERIFIED 2026-08-06** (human Studio sync: `R.string` resolves with no build, via §4.5c's second-amendment mechanism — DSL `srcDir` at `finalizeDsl`). Originally: OPEN DEFECT, diagnosed 2026-08-03, three fixes attempted and reverted
 
 **Symptom.** `R.string.your_key` is red in Android Studio's editor while every build compiles it. A Gradle sync does not fix it, because sync only configures the model — it never executes tasks, so the generated directory does not exist to be indexed.
 
@@ -936,7 +936,7 @@ The classloader defect was the more urgent of the two and was found only by the 
 ### Correctness items from the M4/M5 audit
 
 - ~~`markupPolicy` silently no-ops~~ — **closed 2026-07-31.** Any non-`ERROR` value now fails at configuration time, naming the value, stating that only `ERROR` ships in v0, and pointing at D4.
-- **Applying both plugins to one module** dies with a raw `org.gradle.api.CircularReferenceException` naming nothing about Articulate — a violation of §4.1 lesson 6 (messages must name the problem and the fix). One-line guard: `if (i18nProjectPath != project.path) project.evaluationDependsOn(i18nProjectPath)`.
+- ~~**Applying both plugins to one module** dies with a raw `org.gradle.api.CircularReferenceException`~~ — **RESOLVED by the §4.5 consumable-configuration redesign** (2026-08-01), not by the guard sketched here (`evaluationDependsOn` no longer exists in the plugin at all). Pinned by `AndroidWiringFunctionalTest`'s both-plugins-one-module test, which survived every mechanism change since, including §4.5c's.
 - **`GenerateXcstringsTask`'s "ios catalog not configured" error is unreachable.** `xcstringsFile` is `@OutputFile` without `@Optional`, so Gradle's own property validation fires first with a generic message. Either mark it `@Optional` so the helpful error can run, or delete the dead branch. `VerifyStringsTask`'s equivalent guard *does* fire, because it uses `@Internal`.
 
 ### Infrastructure gaps
@@ -950,7 +950,7 @@ The classloader defect was the more urgent of the two and was found only by the 
 
 ### Spec gap
 
-- **The `commonMain` keys object — BLOCKED ON A SAMPLE PROJECT (2026-07-31), deliberately.** Listed in D7's v0 scope and assigned to `net.sarazan.articulate` in §4.2, but §4.4's task table omits it and nothing implements it (a drafting error in §4, not an implementation miss). Rather than rule blind, the decision waits on something to evaluate against — see §14. The two things that make it non-trivial and that a sample would make concrete: wiring generated code into `commonMain` needs a **KMP integration surface the plugin does not have** (a third one, alongside AGP), and the brief's "resolve at platform edge" is natural on iOS (`String(localized:table:)` takes a string key) but awkward on Android, where `getString` needs an **int** resource ID — so a bare key needs either `getIdentifier()` (reflective, discouraged) or a second generated key→`R.string` mapping. That half is unspecified.
+- **The `commonMain` keys object — RULED, see §14** (2026-08-01: no keys object; sealed types recommended; flat tokens deferred as a post-v0 feature with the §14 amendments' accounting). The paragraph below is the pre-ruling state, kept as the record of why it once blocked: ** Listed in D7's v0 scope and assigned to `net.sarazan.articulate` in §4.2, but §4.4's task table omits it and nothing implements it (a drafting error in §4, not an implementation miss). Rather than rule blind, the decision waits on something to evaluate against — see §14. The two things that make it non-trivial and that a sample would make concrete: wiring generated code into `commonMain` needs a **KMP integration surface the plugin does not have** (a third one, alongside AGP), and the brief's "resolve at platform edge" is natural on iOS (`String(localized:table:)` takes a string key) but awkward on Android, where `getString` needs an **int** resource ID — so a bare key needs either `getIdentifier()` (reflective, discouraged) or a second generated key→`R.string` mapping. That half is unspecified.
 
 ### Still-open decisions
 
