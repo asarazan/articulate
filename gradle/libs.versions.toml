@@ -1,7 +1,7 @@
 [versions]
 # Max Gradle fully supported by KGP 2.4.10 is 9.5.0 — wrapper is pinned to match.
 kotlin = "2.4.10"
-junit = "5.14.4"
+junit = "6.1.2"
 # D9 — the supported floor. compileOnly-pinned so `plugin` cannot accidentally
 # compile against a newer AGP API a floor consumer wouldn't have at runtime.
 agp = "9.1.0"
