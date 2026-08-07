@@ -1,0 +1,9 @@
+package net.sarazan.articulate.showcase
+
+class Greeting {
+    private val platform = getPlatform()
+
+    fun greet(): String {
+        return sayHello(platform.name)
+    }
+}
