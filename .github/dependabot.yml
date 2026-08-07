@@ -6,6 +6,22 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # KGP 2.4.10's supported Gradle ceiling is 9.5.0 (documented in
+      # gradle/libs.versions.toml). Dependabot's very first scan proposed the
+      # wrapper bump to 9.6.1 -- the exact upgrade this repo already made once
+      # by accident and reverted -- and CI correctly rejected it. Ignore until
+      # the Kotlin pin moves; then delete this block so the wrapper resumes
+      # updating.
+      - dependency-name: "gradle-wrapper"
+      # Major bumps of the two most invasive build dependencies are deliberate
+      # migrations, not routine updates: junit-bom 6.x and plugin-publish 2.x
+      # both went red on first proposal. Patch/minor keep flowing; majors wait
+      # for a human to schedule the migration (post-release).
+      - dependency-name: "org.junit:junit-bom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "com.gradle.plugin-publish"
+        update-types: ["version-update:semver-major"]
 
   # Actions referenced from .github/workflows/*.yml (actions/checkout,
   # actions/setup-java, gradle/actions/*, android-actions/setup-android,
