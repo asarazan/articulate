@@ -61,6 +61,19 @@ Then a third time, same week: a module applying only `net.sarazan.articulate` re
 
 **Mark verification status in specs.** VERIFIED / BEST-EFFORT / PROVISIONAL, with the evidence. Making an unknown *visible* is what got `TRAILING_NEWLINE` checked — it was provisionally wrong, and one byte would have defeated the whole drift gate.
 
+## Branching and worktrees (adopted 2026-08-06)
+
+Trunk is `main`, **protected**: nothing lands except through a PR with the `CI` gate green. Feature work happens on `feature/<slug>` branches, **one worktree per feature** so several can be in flight:
+
+```bash
+git worktree add ../articulate-wt/<slug> -b feature/<slug>
+```
+
+- **Merges preserve commit messages** — merge commit or rebase-merge, **never squash**. Commit messages in this repo are load-bearing records (they carry the evidence trail specs cite); squashing destroys them.
+- **Agents still run no git, ever** — the orchestrator creates branches/worktrees and commits. The absolute prohibition in the section above is unchanged by this workflow.
+- Delete the worktree and branch after merge; a stale worktree is uncommitted-work risk.
+- **While any agent owns a working tree, the human's IDE is a consumer of that tree**: `includeBuild` means a Studio sync compiles whatever half-written state exists at that moment. Announce hot trees before inviting a sync; prefer giving agents their own worktree for anything long-running.
+
 ## Delegating work
 
 **The auditor must never be the implementer.** Separation matters more than model tier — a producer cannot see the shape of what it failed to write. Every high-value finding in this project has been an **absence**: a missing input declaration, twelve untested specifier families, an assertion that asserts nothing. Audit for negative space, not for errors.
