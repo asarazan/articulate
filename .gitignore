@@ -18,3 +18,11 @@ local.properties
 
 # macOS
 .DS_Store
+
+# Android Studio regenerates this with whatever JDK it fancies (25, last
+# time), and it has now reached a commit twice via unreviewed sweeps. The
+# ROOT gradle/gradle-daemon-jvm.properties (JDK 17) is tracked and
+# deliberate; the sample must follow JAVA_HOME instead -- its daemon JVM
+# criteria file broke CI by forcing toolchain provisioning inside a nested
+# test JVM where Gradle's native services cannot initialize.
+sample/gradle/gradle-daemon-jvm.properties
