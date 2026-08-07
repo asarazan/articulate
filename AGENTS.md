@@ -59,6 +59,8 @@ Then a third time, same week: a module applying only `net.sarazan.articulate` re
 
 **Rebuild and re-run the full suite after every fix, not after batching several.** A fix that breaks a neighbour must be caught while the cause is unambiguous.
 
+**When the IDE misbehaves, read `idea.log` before touching anything.** Studio is not un-inspectable: it logs to `~/Library/Logs/Google/AndroidStudio*/idea.log`, and "read the artifacts a failure leaves" applies to IDEs exactly as to builds. Six remedies were once run against an editor whose log had, from the first minute, a full stack naming the crashing component (the Compose Preview scanner throwing inside the K2 analysis session — one `@Preview` annotation poisoning analysis for every module in the project). Grep for `SEVERE`, then extract the **whole stack block above it** — the summary lines alone name the victim, not the culprit. Theories are what you write *after* the stack trace.
+
 **Mark verification status in specs.** VERIFIED / BEST-EFFORT / PROVISIONAL, with the evidence. Making an unknown *visible* is what got `TRAILING_NEWLINE` checked — it was provisionally wrong, and one byte would have defeated the whole drift gate.
 
 ## Branching and worktrees (adopted 2026-08-06)
