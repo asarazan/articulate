@@ -1046,6 +1046,8 @@ D2's third test tier is a `sample/` composite build as an end-to-end smoke. This
 ## 15. Showcase app — SPEC, 2026-08-06
 
 ### 15.0 Purpose and non-goals
+
+**Value proposition, ruled 2026-08-07 (user's words, verbatim): "our entire value prop is to be as minimal and unopinionated and as close to platform native as possible."** Every showcase decision tests against that sentence. Consequence ruled the same day: the wizard's `sharedUI` module — Compose Multiplatform plugins wrapping what is functionally Jetpack Compose, consumed only by Android — is **removed** in a dedicated, clearly-labeled positioning commit immediately after the pristine seed commit: its screen folds into `androidApp` as plain androidx Compose, the CMP plugins and artifacts leave the build entirely. CMP in the platonic-ideal demo undermines the value prop drastically; wizard naming: `sharedLogic` is kept as-is (it plays §15.3's `:shared` role — no cosmetic renames against the pristine diff).
 A **marketing-grade, runnable proof** of the positioning: native SwiftUI + shared Kotlin + Compose-on-Android, one source of truth for copy. Lives at top-level `showcase/`. **Non-goals:** it is not a test fixture (`sample/` keeps that job untouched — its per-module classloader shapes are load-bearing and must not be "improved"); **no Compose Multiplatform anywhere** (Compose appears only as Android's native UI toolkit, which is itself the demo that Compose works — no separate "CMP feature"); **no architecture dependencies** (no SKIE, no DI, no nav libs — SwiftUI observes shared state through a hand-rolled callback bridge, because the foreground must stay localization, not KMP plumbing); translations beyond `en` are illustrative and marked as such.
 
 ### 15.1 The app: "Checklist"
