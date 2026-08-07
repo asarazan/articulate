@@ -6,6 +6,11 @@ plugins {
     // catalog entry in gradle/libs.versions.toml. Required to compile the @Composable
     // App() below.
     alias(libs.plugins.composeCompiler)
+    // Wires :i18n's generated Android res/ into this module (PLAN.md §15.6 lane A).
+    // Version string is ignored -- settings.gradle.kts substitutes the plugin under
+    // development via includeBuild(".."). Convention default i18nProject = ":i18n"
+    // already matches this module layout, so no articulateAndroid {} block is needed.
+    id("net.sarazan.articulate.android") version "0.1.0"
 }
 
 kotlin {
@@ -15,6 +20,7 @@ kotlin {
 }
 dependencies {
     implementation(project(":sharedLogic"))
+    implementation(project(":i18n"))
 
     implementation(libs.androidx.activity.compose)
 

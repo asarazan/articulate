@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Liste de tâches</string>
+    <string name="screen_title">Mes tâches</string>
+    <string name="empty_state_title">Rien pour l\'instant</string>
+    <string name="empty_state_body">Ajoutez votre première tâche pour commencer.</string>
+    <string name="add_placeholder">Qu\'y a-t-il à faire ?</string>
+    <string name="add_button">Ajouter</string>
+    <string name="task_added">Ajouté : %1$s</string>
+    <plurals name="tasks_remaining">
+        <item quantity="one">%1$d tâche restante</item>
+        <item quantity="other">%1$d tâches restantes</item>
+    </plurals>
+    <string name="delete_confirm">Supprimer %1$s ?</string>
+    <string name="delete_yes">Supprimer</string>
+    <string name="delete_no">Annuler</string>
+    <string name="error_task_empty">Le nom de la tâche ne peut pas être vide.</string>
+    <string name="error_task_too_long">Le nom de la tâche doit contenir au plus %1$d caractères.</string>
+    <string name="error_task_duplicate">%1$s figure déjà dans la liste.</string>
+</resources>

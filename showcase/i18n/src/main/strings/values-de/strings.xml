@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Checkliste</string>
+    <string name="screen_title">Meine Aufgaben</string>
+    <string name="empty_state_title">Noch nichts hier</string>
+    <string name="empty_state_body">Füge deine erste Aufgabe hinzu, um loszulegen.</string>
+    <string name="add_placeholder">Was ist zu tun?</string>
+    <string name="add_button">Hinzufügen</string>
+    <string name="task_added">Hinzugefügt: %1$s</string>
+    <plurals name="tasks_remaining">
+        <item quantity="one">%1$d Aufgabe übrig</item>
+        <item quantity="other">%1$d Aufgaben übrig</item>
+    </plurals>
+    <string name="delete_confirm">%1$s löschen?</string>
+    <string name="delete_yes">Löschen</string>
+    <string name="delete_no">Abbrechen</string>
+    <string name="error_task_empty">Der Aufgabenname darf nicht leer sein.</string>
+    <string name="error_task_too_long">Der Aufgabenname darf höchstens %1$d Zeichen haben.</string>
+    <string name="error_task_duplicate">%1$s steht bereits auf deiner Liste.</string>
+</resources>
