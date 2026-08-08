@@ -1,5 +1,6 @@
 package net.sarazan.articulate.gradle
 
+import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.provider.Property
 
 /**
@@ -20,4 +21,18 @@ abstract class ArticulateAndroidExtension {
 
     /** Gradle project path of the module `net.sarazan.articulate` is applied to. Default `:i18n`. */
     abstract val i18nProject: Property<String>
+
+    /**
+     * Escape hatch for non-conventional layouts: the i18n-owning module's
+     * strings source directory, as this app module sees it. When unset, it is
+     * DERIVED by pure path convention from [i18nProject] --
+     * `<rootDir>/<project path segments>/src/main/strings` -- because the IDE
+     * registration must never resolve a configuration at configuration time
+     * (doing so strips kotlin-stdlib from this module's Android Studio model;
+     * bisection-proven 2026-08-08, see ArticulateAndroidPlugin's KDoc). A
+     * build-time check verifies the derived path against what the i18n module
+     * actually publishes and fails with instructions if they diverge -- so a
+     * wrong convention is loud, never silent.
+     */
+    abstract val androidStringsDir: DirectoryProperty
 }

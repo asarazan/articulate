@@ -363,50 +363,86 @@ class ArticulateAndroidPlugin : Plugin<Project> {
             // though the finalizeDsl registration below (used purely to read
             // a path) does not carry any task dependency of its own.
             project.tasks.named("preBuild").configure { preBuild ->
-                preBuild.dependsOn(articulateAndroidResIn)
+                preBuild.dependsOn("verifyArticulateWiring")
             }
 
-            // SECOND AMENDMENT, 2026-08-06 (PLAN.md §4.5c): AGP rejects a
-            // Provider payload in the DSL SourceSet API by design ("You
-            // cannot add Provider instances to the Android SourceSet API ...
-            // use the Sources interface"), and the Sources interface
-            // (addStaticSourceDirectory, this class's previous mechanism --
-            // see the KDoc history above) is exactly what a two-sided human
-            // experiment proved Android Studio's editor model ignores. So
-            // the DSL needs a literal path, resolved eagerly.
+            // THIRD AMENDMENT, 2026-08-08 (PLAN.md §4.5c) -- registration by
+            // PATH CONVENTION, never by resolution. A line-level bisection
+            // through published diagnostic builds proved that eagerly
+            // resolving articulateAndroidResIncoming at configuration time --
+            // the previous mechanism's finalizeDsl resolve -- is what strips
+            // kotlin-stdlib from the consuming module's Android Studio
+            // dependency model (types still infer via compiler builtins;
+            // stdlib extensions like `let` stay unresolved; un-applying this
+            // plugin heals it). Build A+B without the resolve: healthy.
+            // Re-adding the resolve alone, with NO srcDir registration:
+            // sick. The configuration and the preBuild gate are innocent.
             //
-            // finalizeDsl is the window because it is (a) after the
-            // consumer's articulateAndroid { i18nProject = ... } block has
-            // already run, (b) still mutable -- that is finalizeDsl's whole
-            // purpose -- and (c) before AGP creates the per-variant
-            // consumable configurations whose consume-marking is what made
-            // the old onVariants-based self-apply resolution explode (see
-            // "§4.5c correction" in the KDoc above): those configurations
-            // cannot be marked "consumed as a variant" if they do not exist
-            // yet. This resolves synchronously, at configuration time, for
-            // ANY requested task (finalizeDsl fires as part of ordinary
-            // project configuration, not only when a task actually consumes
-            // this configuration as a real input) -- exactly the same
-            // resolution-timing shape the previous onVariants/afterEvaluate
-            // mechanisms had, so §4.5c's asymmetry (resolving-for-a-path
-            // alone runs nothing; only preBuild.dependsOn above wires in the
-            // real validateStrings gate) still holds unchanged. No lenient
-            // artifact view: a resolution failure (missing project; project
-            // without net.sarazan.articulate applied) still throws Gradle's
-            // own loud resolution diagnostics, naming the project path. If
-            // resolution succeeds but yields anything other than exactly one
-            // file, this plugin throws its own GradleException naming the
-            // configured i18nProject path and the fix.
+            // AGP's DSL srcDir also rejects Provider payloads by design and
+            // eagerly resolves FileCollection payloads at call time (both
+            // proven), so the ONLY safe payload is a plain File computed
+            // WITHOUT resolution: by convention, project path ":i18n" lives
+            // at <rootDir>/i18n and its strings at src/main/strings. Pure
+            // string math, zero configuration access. finalizeDsl remains
+            // the call window (after the consumer's extension block, DSL
+            // still mutable) -- but it now touches no Configuration.
+            //
+            // A wrong convention is loud, not silent: verifyArticulateWiring
+            // below resolves the configuration AT EXECUTION TIME (safe) and
+            // fails the build if the registered path is not the directory
+            // the i18n module actually publishes, naming the escape hatch.
             androidComponents.finalizeDsl {
-                val resolvedFiles = articulateAndroidResIn.files
-                val stringsDir = resolvedFiles.singleOrNull() ?: throw GradleException(
-                    "net.sarazan.articulate.android: resolving $ARTICULATE_ANDROID_RES_INCOMING_CONFIGURATION " +
-                        "against i18nProject '${extension.i18nProject.get()}' produced ${resolvedFiles.size} " +
-                        "files (expected exactly 1 -- the i18n-owning project's strings source directory). " +
-                        "Check that '${extension.i18nProject.get()}' applies net.sarazan.articulate, or " +
-                        "point articulateAndroid { i18nProject = \":your-i18n-module\" } at the module that does.",
-                )
-                androidExtension.sourceSets.getByName("main").res.srcDir(stringsDir.absolutePath)
+                val registered = extension.androidStringsDir.asFile.orNull
+                    ?: extension.i18nProject.get().let { path ->
+                        project.rootDir
+                            .resolve(path.trimStart(':').replace(':', '/'))
+                            .resolve("src/main/strings")
+                    }
+                androidExtension.sourceSets.getByName("main").res.srcDir(registered)
+            }
+
+            // Execution-time wiring check: the one place the configuration is
+            // ever resolved, safely inside a task action. Carries the
+            // validateStrings gate implicitly (the configuration's artifact
+            // is builtBy validateStrings), so this task REPLACES the bare
+            // preBuild.dependsOn(configuration) edge as the gate carrier --
+            // preBuild depends on this task instead (wired above).
+            // Everything the task action needs is captured as serializable
+            // values up front -- a live Configuration or Project reference in
+            // doLast breaks configuration-cache reuse (caught by the CC
+            // tests on first run of this mechanism).
+            val incomingFiles = project.files(articulateAndroidResIn)
+            val rootDir = project.rootDir
+            val registeredProvider = extension.androidStringsDir.asFile
+                .orElse(extension.i18nProject.map { path ->
+                    rootDir
+                        .resolve(path.trimStart(':').replace(':', '/'))
+                        .resolve("src/main/strings")
+                })
+            project.tasks.register("verifyArticulateWiring") { task ->
+                task.group = ARTICULATE_TASK_GROUP
+                task.description = "Fails if the convention-derived res registration does not match the " +
+                    "directory the i18n-owning module actually publishes (articulateAndroidResElements)."
+                task.inputs.files(incomingFiles).withPropertyName("articulateAndroidResIncoming")
+                task.doLast {
+                    val published = incomingFiles.files.singleOrNull() ?: throw GradleException(
+                        "net.sarazan.articulate.android: resolving " +
+                            "$ARTICULATE_ANDROID_RES_INCOMING_CONFIGURATION produced " +
+                            "${incomingFiles.files.size} files (expected exactly 1 -- the i18n-owning " +
+                            "project's strings source directory). Check that the project named by " +
+                            "articulateAndroid { i18nProject } applies net.sarazan.articulate.",
+                    )
+                    val registered = registeredProvider.get()
+                    if (registered.canonicalFile != published.canonicalFile) {
+                        throw GradleException(
+                            "net.sarazan.articulate.android: the res directory registered for the IDE " +
+                                "(${registered}) is not the directory the i18n module publishes " +
+                                "(${published}). Fix: set articulateAndroid { androidStringsDir = " +
+                                "file(\"${published}\") } in this module, or align the i18n module's " +
+                                "articulate { stringsDir } with the src/main/strings convention.",
+                        )
+                    }
+                }
             }
         }
     }

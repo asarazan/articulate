@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Checklist</string>
+    <string name="screen_title">My Tasks</string>
+    <string name="empty_state_title">Nothing here yet</string>
+    <string name="empty_state_body">Add your first task to get started.</string>
+    <string name="add_placeholder">What needs doing?</string>
+    <string name="add_button">Add</string>
+    <!-- Shown briefly after a task is added, e.g. as a snackbar or toast. -->
+    <string name="task_added">Added: %1$s</string>
+    <!-- Header count of incomplete tasks. Always greater than zero; when it would be zero, empty_state_title/empty_state_body are shown instead. -->
+    <plurals name="tasks_remaining">
+        <item quantity="one">%1$d task remaining</item>
+        <item quantity="other">%1$d tasks remaining</item>
+    </plurals>
+    <string name="delete_confirm">Delete %1$s?</string>
+    <string name="delete_yes">Delete</string>
+    <string name="delete_no">Cancel</string>
+    <string name="error_task_empty">Task name can\'t be empty.</string>
+    <string name="error_task_too_long">Task name must be %1$d characters or fewer.</string>
+    <string name="error_task_duplicate">%1$s is already on your list.</string>
+    <string name="brand_tagline" translatable="false">Powered by Articulate</string>
+</resources>

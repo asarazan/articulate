@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">清单</string>
+    <string name="screen_title">我的任务</string>
+    <string name="empty_state_title">暂无任务</string>
+    <string name="empty_state_body">添加你的第一个任务开始使用。</string>
+    <string name="add_placeholder">需要做什么?</string>
+    <string name="add_button">添加</string>
+    <string name="task_added">已添加：%1$s</string>
+    <plurals name="tasks_remaining">
+        <item quantity="other">还剩%1$d项任务</item>
+    </plurals>
+    <string name="delete_confirm">删除%1$s？</string>
+    <string name="delete_yes">删除</string>
+    <string name="delete_no">取消</string>
+    <string name="error_task_empty">任务名称不能为空。</string>
+    <string name="error_task_too_long">任务名称不能超过%1$d个字符。</string>
+    <string name="error_task_duplicate">%1$s已在列表中。</string>
+</resources>

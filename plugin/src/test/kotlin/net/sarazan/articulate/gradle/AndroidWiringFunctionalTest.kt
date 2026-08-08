@@ -336,11 +336,13 @@ class AndroidWiringFunctionalTest {
         writeAndroidSettings(projectDir, modules = listOf("app"))
         writeAndroidAppModule(projectDir, i18nProjectPath = ":does-not-exist", withMarker = false)
 
-        // PLAN.md §4.5c: resolution now happens eagerly inside onVariants,
-        // at CONFIGURATION time for :app -- which runs for any requested
-        // task, not just one that declares this configuration as an input.
-        // :app:help is enough to trigger it.
-        val result = androidRunner(":app:help").buildAndFail()
+        // PLAN.md §4.5c THIRD AMENDMENT (2026-08-08): the configuration is
+        // never resolved at configuration time any more -- doing so was
+        // bisection-proven to strip kotlin-stdlib from the consuming module's
+        // IDE model. Resolution happens only inside verifyArticulateWiring's
+        // task action, wired via preBuild -- so the failure surfaces on the
+        // first real build, not on :app:help. Same clear message, new moment.
+        val result = androidRunner(":app:preBuild").buildAndFail()
 
         assertTrue(
             result.output.contains("Project with path ':does-not-exist' could not be found"),
@@ -357,7 +359,7 @@ class AndroidWiringFunctionalTest {
         File(i18nDir, "build.gradle").writeText("")
         writeAndroidAppModule(projectDir, withMarker = false)
 
-        val result = androidRunner(":app:help").buildAndFail()
+        val result = androidRunner(":app:preBuild").buildAndFail()
 
         assertTrue(
             result.output.contains("Could not resolve project :i18n") &&

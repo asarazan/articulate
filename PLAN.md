@@ -622,6 +622,19 @@ The shipped shape is therefore: collect in `onVariants`, register in `afterEvalu
 
 **What the prototype could NOT establish:** whether Studio's sync model reads DSL source-set additions made at `finalizeDsl` time — the consumer experiment added its line at script-evaluation time, an earlier window. That is the residual risk, answerable only by the human sync. If it fails, the documented fallback is the consumer one-liner, which is proven.
 
+**THIRD AMENDMENT 2026-08-08 — registration by path convention; configuration-time resolution is PROVEN to poison the IDE.** A consumer-side experiment (un-applying `net.sarazan.articulate.android` healed a module whose stdlib extensions would not resolve while its types still inferred — compiler builtins work without stdlib, extensions do not) followed by a line-level bisection through published diagnostic builds:
+
+| Diagnostic build | Behaviors | `.let` in Studio |
+|---|---|---|
+| 1 | configuration+dependency (A) + preBuild gate (B) | **black — healthy** |
+| 2 | A + B + eager `finalizeDsl` resolution (C), no registration | **red — sick** |
+
+**Eagerly resolving `articulateAndroidResIncoming` at configuration time strips `kotlin-stdlib` from the consuming module's Android Studio dependency model.** CLI is unaffected (stdlib present on `debugCompileClasspath` throughout) — the damage is specific to sync's model building, which no test harness here drives; the tell was Gradle's own "resolved during configuration time" warning, printed all day. The invalid control that hid this for a week: `sample/androidApp` contains no stdlib-extension calls at all, so it never showed the disease it almost certainly has had since the plugin's first version.
+
+AGP's `srcDir` payload matrix, all empirically established: `Provider` — rejected by design; `FileCollection` — **eagerly resolved at call time** (during AGP's own apply, before the consumer's extension block runs); plain `File` — safe. **Shipped mechanism:** derive the path by pure convention (`<rootDir>/<project-path-segments>/src/main/strings`) with zero configuration access, register it as a `File` at `finalizeDsl`; `articulateAndroid { androidStringsDir }` is the escape hatch for exotic layouts; and `verifyArticulateWiring` — the only place the configuration is ever resolved, inside a task action — fails the first build with naming-the-fix instructions if convention and reality diverge. The `preBuild` gate now rides through that task. The clear-resolution-error contract moves from configuration time to first build, deliberately.
+
+Also established on the way: the dev-loop for IDE-consumed samples is **publish-and-consume via mavenLocal** (`./gradlew :plugin:publishToMavenLocal`), not `includeBuild` — a composite in the consumer was an early suspect and is retired from IDE-facing projects regardless, since published-artifact consumption is what real consumers do. Upstream-report material: config-time resolution of a standalone resolvable configuration silently deleting stdlib from the IDE model.
+
 **What remains human, recorded not glossed:** Studio rendering. After this lands, a clean sync should resolve `R.string` with no build, because the registered path is the always-on-disk source tree. §4.5's open-defect entry gets amended to "expected fixed by §4.5c, awaiting human Studio confirmation" — it is not VERIFIED until a human syncs and says so.
 
 ### 4.6 Configuration-cache rules — non-negotiable, and the reason M4's audit is Opus
