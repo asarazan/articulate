@@ -34,7 +34,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 
 // Plain androidx Jetpack Compose Checklist UI (PLAN.md §15.0/§15.1/§15.4). Folded in from
@@ -44,7 +43,12 @@ import androidx.compose.ui.unit.dp
 // string below is resolved via stringResource/pluralStringResource against :i18n's
 // generated R class; that's the entire demo.
 @Composable
-@Preview
+// @Preview REMOVED 2026-08-07: Studio AI-261's Compose Preview finder crashes
+// on this file with "Invalid PSI Element ... different providers" thrown from
+// inside KaBaseSessionProvider.beforeEnteringAnalysis -- which poisons K2
+// analysis for the ENTIRE project (every module red, stdlib included) on
+// every sync. Full stack in the session log / upstream report. Re-add when
+// Studio fixes the preview scanner; the app itself is unaffected.
 fun App() {
     MaterialTheme {
         val presenter = remember { ChecklistPresenter() }
