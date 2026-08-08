@@ -20,10 +20,10 @@ import java.nio.file.Path
  */
 internal object FunctionalTestSupport {
 
-    /** Minimal settings file: just names the root project. No included builds -- the plugin classpath comes from TestKit injection, not `includeBuild`. */
-    fun writeSettings(projectDir: Path, name: String = "fixture") {
+    /** Minimal settings file: just names the root project "fixture". No included builds -- the plugin classpath comes from TestKit injection, not `includeBuild`. */
+    fun writeSettings(projectDir: Path) {
         File(projectDir.toFile(), "settings.gradle").writeText(
-            "rootProject.name = '$name'\n",
+            "rootProject.name = 'fixture'\n",
         )
     }
 
@@ -235,14 +235,12 @@ internal object FunctionalTestSupport {
      * Android app module, `net.sarazan.articulate.android` + `com.android.application`).
      * [modules] is only the `include` order; it is **not** the evaluation
      * order. Gradle configures siblings in alphabetical path order, so `:app`
-     * is always evaluated before `:i18n` here, and `:i18n`'s
-     * `generateAndroidRes` therefore does *not* exist yet when AGP fires
-     * `:app`'s `onVariants` callbacks. [ArticulateAndroidPlugin]'s
-     * `evaluationDependsOn` is what makes the lookup work anyway --
-     * mutation-verified, see `AndroidWiringFunctionalTest.writeTwoModuleFixture`.
-     * (A previous revision of this doc claimed the opposite, that listing
-     * `:i18n` first made it evaluate first. It does not. Corrected 2026-07-31.)
-     * `google()` is required in `dependencyResolutionManagement`
+     * is always evaluated before `:i18n` here -- this is no longer a hazard
+     * the plugin has to defuse: [ArticulateAndroidPlugin]'s dependency-based
+     * resolution mechanism (PLAN.md §4.5/§4.5c) resolves lazily, at whatever
+     * point the incoming configuration's files are actually needed, so
+     * evaluation order doesn't matter regardless of which module is listed
+     * first. `google()` is required in `dependencyResolutionManagement`
      * even though AGP's own jar reaches the fixture via the injected
      * plugin-under-test classpath, not via these repositories (see
      * [writeAndroidAppModule]) -- AGP dynamically resolves its own runtime
@@ -253,7 +251,7 @@ internal object FunctionalTestSupport {
      * `settings.gradle.kts`, even though nothing here currently resolves a
      * plugin marker through it.
      */
-    fun writeAndroidSettings(projectDir: Path, name: String = "fixture", modules: List<String> = listOf("i18n", "app")) {
+    fun writeAndroidSettings(projectDir: Path, modules: List<String> = listOf("i18n", "app")) {
         File(projectDir.toFile(), "settings.gradle").writeText(
             """
             pluginManagement {
@@ -269,18 +267,21 @@ internal object FunctionalTestSupport {
                     mavenCentral()
                 }
             }
-            rootProject.name = '$name'
+            rootProject.name = 'fixture'
             ${modules.joinToString("\n            ") { "include ':$it'" }}
             """.trimIndent(),
         )
     }
 
     /**
-     * The Android app module: applies `net.sarazan.articulate.android` and
-     * `com.android.application` (pinned to [AGP_VERSION] via `plugin`'s own
-     * `testImplementation(libs.android.gradle.plugin)`, see `plugin/build.gradle.kts`),
-     * with `articulateAndroid { i18nProject = ... }` pointing back at the
-     * sibling i18n module.
+     * The Android app module (always at `<projectDir>/app` -- no fixture
+     * needs a second app module, so that path is not a parameter): applies
+     * `net.sarazan.articulate.android` and `com.android.application` (pinned
+     * to [AGP_VERSION] via `plugin`'s own `testImplementation(libs.android.gradle.plugin)`,
+     * see `plugin/build.gradle.kts`), with `articulateAndroid { i18nProject = ... }`
+     * pointing back at the sibling i18n module. `compileSdk`/`targetSdk` are
+     * always [COMPILE_SDK] -- no fixture needs a different value, so that is
+     * not a parameter either.
      *
      * AGP is applied with the **legacy** `apply plugin: 'com.android.application'`
      * rather than `plugins { id 'com.android.application' version '...' }`
@@ -304,12 +305,10 @@ internal object FunctionalTestSupport {
      */
     fun writeAndroidAppModule(
         projectDir: Path,
-        moduleName: String = "app",
         i18nProjectPath: String = ":i18n",
-        compileSdk: Int = COMPILE_SDK,
         withMarker: Boolean = true,
     ) {
-        val appDir = File(projectDir.toFile(), moduleName).apply { mkdirs() }
+        val appDir = File(projectDir.toFile(), "app").apply { mkdirs() }
         File(appDir, "build.gradle").writeText(
             """
             plugins {
@@ -320,12 +319,12 @@ internal object FunctionalTestSupport {
 
             android {
                 namespace 'net.sarazan.articulate.fixture.app'
-                compileSdk $compileSdk
+                compileSdk $COMPILE_SDK
 
                 defaultConfig {
                     applicationId 'net.sarazan.articulate.fixture.app'
                     minSdk 24
-                    targetSdk $compileSdk
+                    targetSdk $COMPILE_SDK
                 }
             }
 
@@ -356,5 +355,43 @@ internal object FunctionalTestSupport {
                 """.trimIndent(),
             )
         }
+    }
+
+    /**
+     * Requires a real Android SDK (skipping or hard-failing per
+     * [requireOrSkipAndroidSdk], depending on [REQUIRE_ANDROID_SDK_ENV]) and
+     * writes `local.properties` pointing at it -- the shared `@BeforeEach`
+     * body [AndroidWiringFunctionalTest] and [AndroidWiringGradleCurrentFunctionalTest]
+     * both need, hoisted here rather than duplicated (PLAN.md §4.5d razor
+     * audit).
+     */
+    fun requireSdkAndWriteLocalProperties(projectDir: Path): File {
+        val sdk = requireOrSkipAndroidSdk()
+        writeLocalProperties(projectDir, sdk)
+        return sdk
+    }
+
+    /**
+     * Writes the standard two-module Android fixture: `:i18n` (source tree +
+     * `net.sarazan.articulate`) and `:app` (`net.sarazan.articulate.android` +
+     * `com.android.application`), sharing [COMPILE_SDK]. Hoisted here from
+     * [AndroidWiringFunctionalTest] and [AndroidWiringGradleCurrentFunctionalTest],
+     * which had it duplicated verbatim (PLAN.md §4.5d razor audit).
+     *
+     * **`include` order is not evaluation order.** Gradle evaluates sibling
+     * projects in alphabetical path order, so `:app` is configured *before*
+     * `:i18n` here no matter which the settings file lists first --
+     * [ArticulateAndroidPlugin]'s dependency-based mechanism resolves
+     * lazily, so this ordering is not a hazard (see [writeAndroidSettings]).
+     * This fixture's `:app`-before-`:i18n` order is kept anyway, as a
+     * standing check that the mechanism really doesn't care.
+     */
+    fun writeTwoModuleFixture(projectDir: Path): File {
+        writeAndroidSettings(projectDir)
+        val i18nDir = File(projectDir.toFile(), "i18n").apply { mkdirs() }
+        writeBaseBuildFile(i18nDir.toPath())
+        writeValidStringsFixture(i18nDir.toPath())
+        writeAndroidAppModule(projectDir)
+        return i18nDir
     }
 }

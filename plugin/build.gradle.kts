@@ -1,5 +1,5 @@
 // The Gradle plugin(s) (D1/D10): `net.sarazan.articulate` (source discovery,
-// generateAndroidRes/generateXcstrings/generateStrings/verifyStrings, the
+// validateStrings/generateXcstrings/generateStrings/verifyStrings, the
 // extension) and `net.sarazan.articulate.android` (AGP variant res wiring
 // only). Thin — delegates all real logic to `core`.
 //
@@ -73,7 +73,8 @@ publishing {
 
 kotlin {
     // Pins the compile JDK independently of whatever JDK launches Gradle —
-    // matches AGP 8.x's own JDK 17 requirement (PLAN.md §12).
+    // matches AGP 9.1's own JDK 17 requirement (D9, REVISED 2026-08-03;
+    // PLAN.md §12/§E2).
     jvmToolchain(17)
 }
 
@@ -83,20 +84,20 @@ kotlin {
 // non-Android consumer of `net.sarazan.articulate` never pulls AGP onto its
 // classpath, and the two plugin IDs share this one jar. This configuration
 // exists purely to feed `pluginUnderTestMetadata` below, for TestKit.
-val agpTestKitClasspath: Configuration by configurations.creating {
-    isCanBeConsumed = false
-    isCanBeResolved = true
-}
-
+//
 // There used to be a second, parallel TestKit classpath configuration here
 // (PLAN.md §E2/D9, Task 3): the matrix's two cells ran different AGP
 // versions (8.5.2 floor vs 9.1.0 upper), so each needed its own plugin
 // classpath. REVISED 2026-08-03: the floor moved to AGP 9.1.0, so both
 // cells now run the *same* AGP -- the matrix's real axis is Gradle version
 // (ANDROID_GRADLE_FLOOR_VERSION vs the wrapper), not AGP. With one AGP
-// version, the default `pluginUnderTestMetadata` below (which already
-// resolves `agpTestKitClasspath` = the catalog's 9.1.0) serves both cells,
-// and the duplicate classpath machinery had no remaining job. Deleted.
+// version, this single configuration (which already resolves to the
+// catalog's 9.1.0) serves both cells, and the duplicate classpath machinery
+// had no remaining job. Deleted.
+val agpTestKitClasspath: Configuration by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
 
 // `core` is BUNDLED into this jar rather than published as its own artifact.
 // The core/plugin *module* split (D1) exists for development -- fast unit tests

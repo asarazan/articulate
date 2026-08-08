@@ -3,20 +3,22 @@ package net.sarazan.articulate.gradle
 import org.gradle.api.attributes.Attribute
 
 /**
- * PLAN.md §4.5/§13: how `net.sarazan.articulate.android` (applied to the app
- * module) obtains `net.sarazan.articulate`'s (applied to the i18n-owning
- * module, conventionally `:i18n`) generated Android res tree, replacing the
- * release-blocking cross-project task-container lookup
+ * PLAN.md §4.5/§4.5b/§13: how `net.sarazan.articulate.android` (applied to
+ * the app module) obtains `net.sarazan.articulate`'s (applied to the
+ * i18n-owning module, conventionally `:i18n`) strings source tree,
+ * replacing the release-blocking cross-project task-container lookup
  * (`i18nProject.tasks.named("generateAndroidRes", GenerateAndroidResTask::class.java)`).
  *
  * The i18n-owning project exposes a **consumable** configuration carrying
- * [ARTICULATE_ANDROID_RES_ATTRIBUTE]; the app module declares a
+ * [ARTICULATE_ANDROID_RES_ATTRIBUTE] and publishing the strings *source*
+ * directory itself (`extension.stringsDir`, artifact `builtBy validateStrings`
+ * -- PLAN.md §4.5b), not a generated copy. The app module declares a
  * **resolvable** configuration with the same attribute plus an ordinary
  * project dependency, then resolves it. That is dependency-graph resolution,
  * not project-container access -- permitted under isolated projects
- * (verified by prototype, PLAN.md §4.5), and it carries the task dependency
- * on `generateAndroidRes` implicitly via the artifact's `builtBy`, with no
- * `dependsOn` anywhere in this plugin.
+ * (verified by prototype, PLAN.md §4.5), and it carries the implicit
+ * dependency on `:i18n:validateStrings` via the artifact's `builtBy`, with no
+ * `dependsOn` on a project anywhere in this plugin.
  *
  * **Both [ArticulatePlugin] and [ArticulateAndroidPlugin] reference this same
  * file, and that is not a class-identity requirement across classloaders.**

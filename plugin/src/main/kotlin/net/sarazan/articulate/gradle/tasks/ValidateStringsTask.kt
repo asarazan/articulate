@@ -14,28 +14,21 @@ import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.UntrackedTask
 
 /**
- * PLAN.md §4.5b: the gate that replaces `GenerateAndroidResTask`'s validation
- * side-effect once that task's only other job -- copying an already-valid
- * Android resource tree byte-for-byte -- is deleted as dead work (§4.5b's
- * verified premise: the copy was `copyTo`, nothing more).
+ * PLAN.md §4.5b: validation gate for the strings source tree, replacing
+ * `GenerateAndroidResTask`'s copy-and-validate step now that the copy itself
+ * is dead work (verified premise: the copy was `copyTo`, nothing more) --
+ * see PLAN.md §4.5b for the full genealogy.
  *
- * Runs the exact same [AndroidToXcstringsConverter.convert] pipeline
- * `GenerateAndroidResTask` used to run purely as a correctness gate --
- * every D4/D6/D5b/§4.3 hard error in `docs/CONVERSIONS.md` -- so a strings
- * tree that would fail `generateXcstrings` fails the Android build too,
- * rather than only surfacing on the iOS side. Produces no output: the
- * **set** of rejected inputs must not change from what `GenerateAndroidResTask`
- * rejected, and this is the mechanism `ArticulatePlugin` wires as the
+ * Runs the same [AndroidToXcstringsConverter.convert] pipeline
+ * `generateXcstrings` uses, purely as a correctness gate, producing no
+ * output: this is the task `ArticulatePlugin` wires as the
  * `articulateAndroidResElements` consumable artifact's `builtBy`, so
- * resolving that configuration *for a build* runs this first (§4.5b point 2).
+ * resolving that configuration *for a build* runs this first.
  *
  * **No declared outputs, [UntrackedTask]** -- exactly [net.sarazan.articulate.gradle.tasks.VerifyStringsTask]'s
  * reasoning: a gate must re-verify every time it participates in a real
  * build's task graph, not report `UP-TO-DATE` and skip. Re-running is cheap
- * (pure in-memory parse), and per §4.5b, resolving the consumable
- * configuration merely *for a path* (e.g. at IDE sync) never runs this task
- * at all -- only a real task graph edge (via `builtBy`) does, and only then
- * should the parse actually happen.
+ * (pure in-memory parse).
  */
 @UntrackedTask(
     because = "A validation gate must re-run whenever it participates in a real build's task graph, " +

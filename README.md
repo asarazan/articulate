@@ -63,20 +63,30 @@ plugins {
 dependencies {
     implementation(project(":i18n"))
 }
+
+articulateAndroid {
+    i18nProject = ":i18n"          // default; set only if your module has a different name
+    // androidStringsDir = file("...")   // escape hatch for non-conventional layouts
+}
 ```
 
-That wires the generated resources into AGP's variant pipeline, so `R.string.your_key` resolves with
-no extra step. The Android tree is generated into `build/` and is disposable; the `.xcstrings` is
-**committed**, because Xcode expects to find it in your repo.
+That registers the i18n module's strings source tree directly as a res source directory on the app
+module, by path convention — so `R.string.your_key` resolves on a sync alone, no build required.
+Nothing is generated for the Android side; the source tree itself is the res root. If your layout
+doesn't match the convention (a differently-named i18n module, or a source dir that isn't
+`src/main/strings`), the mismatch is caught loudly on the first build, naming the fix — not silently,
+and not merely at sync. The `.xcstrings` is **committed**, because Xcode expects to find it in your
+repo.
 
 ## Tasks
 
 | Task | Does |
 |---|---|
-| `generateStrings` | Both of the below |
+| `generateStrings` | Aggregate: `generateXcstrings` + `validateStrings` |
 | `generateXcstrings` | Regenerates the committed `.xcstrings` — commit the result |
-| `generateAndroidRes` | Regenerates the disposable Android `values-*/` tree in `build/` |
+| `validateStrings` | Parses and validates the strings source tree for the Android path — no output |
 | `verifyStrings` | Fails if the committed catalog has drifted from source. **Run this in CI** |
+| `verifyArticulateWiring` | (app module) Fails if the registered Android res path doesn't match what the i18n module actually publishes |
 
 `verifyStrings` is the point of the whole design. Because the serializer is byte-deterministic, drift
 is detectable by comparison alone — which matters because `.xcstrings` is JSON, JSON has no comment
@@ -92,7 +102,6 @@ articulate {
     localeOverrides = mapOf("zh-rSG" to "zh-Hans-SG")
     ios {
         catalog = file("../ios/App/Shared.xcstrings")   // required
-        table = "Shared"                                // default
     }
 }
 ```

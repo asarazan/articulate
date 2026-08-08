@@ -4,7 +4,6 @@ import net.sarazan.articulate.core.convert.AndroidToXcstringsConverter
 import net.sarazan.articulate.core.serialize.XcstringsWriter
 import net.sarazan.articulate.gradle.reportDiagnostics
 import org.gradle.api.DefaultTask
-import org.gradle.api.GradleException
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.MapProperty
@@ -53,13 +52,6 @@ abstract class GenerateXcstringsTask : DefaultTask() {
 
     @TaskAction
     fun generate() {
-        if (!xcstringsFile.isPresent) {
-            throw GradleException(
-                "generateXcstrings: articulate { ios { catalog = file(...) } } is not configured -- " +
-                    "nowhere to write the generated catalog.",
-            )
-        }
-
         val result = AndroidToXcstringsConverter.convert(stringsDir.get().asFile, sourceLanguage.get(), localeOverrides.get())
         reportDiagnostics(logger, result.diagnostics, warningsAsErrors.get(), "generateXcstrings")
 

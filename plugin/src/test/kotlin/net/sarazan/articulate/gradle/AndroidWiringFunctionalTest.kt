@@ -2,11 +2,11 @@ package net.sarazan.articulate.gradle
 
 import net.sarazan.articulate.gradle.FunctionalTestSupport.COMPILE_SDK
 import net.sarazan.articulate.gradle.FunctionalTestSupport.ANDROID_GRADLE_FLOOR_VERSION
-import net.sarazan.articulate.gradle.FunctionalTestSupport.requireOrSkipAndroidSdk
+import net.sarazan.articulate.gradle.FunctionalTestSupport.requireSdkAndWriteLocalProperties
 import net.sarazan.articulate.gradle.FunctionalTestSupport.writeAndroidAppModule
 import net.sarazan.articulate.gradle.FunctionalTestSupport.writeAndroidSettings
 import net.sarazan.articulate.gradle.FunctionalTestSupport.writeBaseBuildFile
-import net.sarazan.articulate.gradle.FunctionalTestSupport.writeLocalProperties
+import net.sarazan.articulate.gradle.FunctionalTestSupport.writeTwoModuleFixture
 import net.sarazan.articulate.gradle.FunctionalTestSupport.writeValidStringsFixture
 import org.gradle.testkit.runner.GradleRunner
 import org.gradle.testkit.runner.TaskOutcome
@@ -81,8 +81,7 @@ class AndroidWiringFunctionalTest {
 
     @BeforeEach
     fun setUp() {
-        val sdk = requireOrSkipAndroidSdk()
-        writeLocalProperties(projectDir, sdk)
+        requireSdkAndWriteLocalProperties(projectDir)
     }
 
     private fun androidRunner(vararg args: String): GradleRunner =
@@ -92,34 +91,6 @@ class AndroidWiringFunctionalTest {
             .withGradleVersion(ANDROID_GRADLE_FLOOR_VERSION)
             .withArguments(*args)
             .forwardOutput()
-
-    /**
-     * Writes the standard two-module fixture: `:i18n` (source tree +
-     * `net.sarazan.articulate`) and `:app` (`net.sarazan.articulate.android` +
-     * `com.android.application`).
-     *
-     * **`include` order is not evaluation order.** Gradle evaluates sibling
-     * projects in alphabetical path order, so `:app` is configured *before*
-     * `:i18n` here no matter which the settings file lists first. Before the
-     * §4.5/§13 redesign, this ordering was a real hazard the plugin had to
-     * defuse explicitly (`project.evaluationDependsOn(i18nProjectPath)`),
-     * because the old cross-project task lookup ran eagerly, inside
-     * `onVariants`. It is no longer a hazard at all: the dependency-based
-     * mechanism resolves lazily, at whatever point `articulateAndroidResIn`'s
-     * files are actually needed -- by then, every project's tasks are
-     * registered regardless of evaluation order, so no explicit ordering
-     * call is needed any more. This fixture's `:app`-before-`:i18n` order is
-     * kept anyway, as a standing check that the redesign really doesn't
-     * care.
-     */
-    private fun writeTwoModuleFixture(): File {
-        writeAndroidSettings(projectDir)
-        val i18nDir = File(projectDir.toFile(), "i18n").apply { mkdirs() }
-        writeBaseBuildFile(i18nDir.toPath())
-        writeValidStringsFixture(i18nDir.toPath())
-        writeAndroidAppModule(projectDir)
-        return i18nDir
-    }
 
     /**
      * PLAN.md §4.5c: `ResolveArticulateAndroidResTask` and its selective copy
@@ -150,7 +121,7 @@ class AndroidWiringFunctionalTest {
      */
     @Test
     fun `presentation files and editor litter beside strings xml flow directly into the app's merged resources`() {
-        val i18nDir = writeTwoModuleFixture()
+        val i18nDir = writeTwoModuleFixture(projectDir)
         val values = File(i18nDir, "src/main/strings/values")
         File(values, "colors.xml").writeText(
             """
@@ -195,7 +166,7 @@ class AndroidWiringFunctionalTest {
 
     @Test
     fun `generated Android res is registered via DSL srcDir at finalizeDsl and R string resolves it`() {
-        val i18nDir = writeTwoModuleFixture()
+        val i18nDir = writeTwoModuleFixture(projectDir)
 
         val result = androidRunner(":app:compileDebugJavaWithJavac", ":app:compileReleaseJavaWithJavac").build()
 
@@ -264,7 +235,7 @@ class AndroidWiringFunctionalTest {
      */
     @Test
     fun `resolving articulateAndroidResIncoming for a path alone does not run validateStrings`() {
-        writeTwoModuleFixture()
+        writeTwoModuleFixture(projectDir)
 
         val result = androidRunner(":app:help").build()
 
@@ -301,7 +272,7 @@ class AndroidWiringFunctionalTest {
      */
     @Test
     fun `an invalid string in the i18n fixture fails the app build with Articulate's own diagnostic`() {
-        val i18nDir = writeTwoModuleFixture()
+        val i18nDir = writeTwoModuleFixture(projectDir)
         File(i18nDir, "src/main/strings/values/strings.xml").writeText(
             """
             <resources>
@@ -367,6 +338,96 @@ class AndroidWiringFunctionalTest {
                 result.output.contains("net.sarazan.articulate.android-res"),
             "expected a clear resolution error naming the misconfigured project and the missing attribute:\n${result.output}",
         )
+    }
+
+    /**
+     * PLAN.md §4.5d razor audit: the THIRD AMENDMENT's "a wrong convention is
+     * loud, not silent" guarantee (`verifyArticulateWiring`) was asserted but
+     * never exercised by a test where the convention-derived path actually
+     * diverges from what `:i18n` publishes -- every other fixture here
+     * happens to follow the `src/main/strings` convention exactly, so the
+     * mismatch branch of `verifyArticulateWiring`'s `if` was never run by
+     * this suite. This pins it both ways: `:i18n`'s `stringsDir` is moved off
+     * the convention, so the app module's convention-derived guess is wrong
+     * until `androidStringsDir` corrects it explicitly.
+     *
+     * **Red-first, verified by mutation (not committed as a test, recorded
+     * here as evidence):** commented out the
+     * `if (registered.canonicalFile != published.canonicalFile) throw ...`
+     * block in `ArticulateAndroidPlugin.verifyArticulateWiring`'s `doLast`,
+     * reran this test. Result: `UnexpectedBuildSuccess` on the first
+     * `buildAndFail()` -- the mismatch build wrongly succeeded, because
+     * nothing compared the convention-derived path against what `:i18n`
+     * actually publishes any more. Restored the file from a backup, reran
+     * this test and the full class, confirmed green again.
+     */
+    @Test
+    fun `androidStringsDir mismatch fails preBuild naming the fix, and setting it resolves the build`() {
+        writeAndroidSettings(projectDir)
+        val i18nDir = File(projectDir.toFile(), "i18n").apply { mkdirs() }
+        writeBaseBuildFile(i18nDir.toPath(), extraConfig = "stringsDir = file('custom/i18n-strings')")
+        val customStringsDir = File(i18nDir, "custom/i18n-strings")
+        File(customStringsDir, "values").mkdirs()
+        File(customStringsDir, "values/strings.xml").writeText(
+            "<resources><string name=\"hello\">Hello</string></resources>",
+        )
+
+        val appDir = File(projectDir.toFile(), "app").apply { mkdirs() }
+        fun writeAppBuildFile(extraArticulateAndroid: String) {
+            File(appDir, "build.gradle").writeText(
+                """
+                plugins {
+                    id 'net.sarazan.articulate.android'
+                }
+
+                apply plugin: 'com.android.application'
+
+                android {
+                    namespace 'net.sarazan.articulate.fixture.app'
+                    compileSdk $COMPILE_SDK
+
+                    defaultConfig {
+                        applicationId 'net.sarazan.articulate.fixture.app'
+                        minSdk 24
+                        targetSdk $COMPILE_SDK
+                    }
+                }
+
+                articulateAndroid {
+                    i18nProject = ':i18n'
+                    $extraArticulateAndroid
+                }
+                """.trimIndent(),
+            )
+        }
+        writeAppBuildFile("")
+        File(appDir, "src/main").mkdirs()
+        File(appDir, "src/main/AndroidManifest.xml").writeText(
+            """
+            <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+                <application />
+            </manifest>
+            """.trimIndent(),
+        )
+
+        // Convention derives i18n/src/main/strings, but :i18n actually
+        // publishes i18n/custom/i18n-strings (via its overridden
+        // `articulate { stringsDir }`) -- the mismatch must fail the first
+        // real build, naming androidStringsDir as the fix, not diverge
+        // silently.
+        val redResult = androidRunner(":app:preBuild").buildAndFail()
+        assertTrue(
+            redResult.output.contains("androidStringsDir") &&
+                redResult.output.contains("net.sarazan.articulate.android"),
+            "expected verifyArticulateWiring to fail naming androidStringsDir as the fix:\n${redResult.output}",
+        )
+
+        // Point androidStringsDir at the real, published directory -- the build must now succeed.
+        val escapedPath = customStringsDir.absolutePath.replace("\\", "\\\\")
+        writeAppBuildFile("androidStringsDir = file('$escapedPath')")
+
+        val greenResult = androidRunner(":app:preBuild").build()
+        assertEquals(TaskOutcome.SUCCESS, greenResult.task(":app:preBuild")!!.outcome)
     }
 
     @Test
@@ -452,7 +513,7 @@ class AndroidWiringFunctionalTest {
 
     @Test
     fun `configuration cache is reused for the Android app path too`() {
-        writeTwoModuleFixture()
+        writeTwoModuleFixture(projectDir)
 
         val first = androidRunner(":app:compileDebugJavaWithJavac", "--configuration-cache").build()
         assertTrue(

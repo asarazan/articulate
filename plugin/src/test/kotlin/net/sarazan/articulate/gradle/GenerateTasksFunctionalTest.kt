@@ -384,4 +384,51 @@ class GenerateTasksFunctionalTest {
         )
         assertFalse(result.output.contains("BUILD SUCCESSFUL"))
     }
+
+    /**
+     * PLAN.md §4.5d razor audit: `localeOverrides` is unit-tested at the
+     * core mapper level ([net.sarazan.articulate.core.locale.AndroidLocaleMapperTest]),
+     * and `ArticulatePlugin` wires `task.localeOverrides.set(extension.localeOverrides)`
+     * on three tasks -- but no functional test ever exercised that wiring
+     * through the Gradle DSL end to end. Without the override, a
+     * `values-zh-rSG` directory maps to `zh-SG` (no `ZH_REGION_TO_SCRIPT`
+     * entry for `SG`, unlike `CN`/`TW`/`HK`); with `localeOverrides.put('zh-rSG', 'zh-Hans-SG')`
+     * set via the DSL, it must map to `zh-Hans-SG` instead -- a clear,
+     * distinguishing signal that the override actually reached the task, not
+     * merely that the build didn't crash.
+     *
+     * **Red-first, verified by mutation (not committed as a test, recorded
+     * here as evidence):** commented out `task.localeOverrides.set(extension.localeOverrides)`
+     * on `generateXcstrings` in `ArticulatePlugin.kt` (leaving the property
+     * at its empty-map default), reran this test. Result: assertion failure
+     * -- the catalog contained `"zh-SG"` (the un-overridden mapping) instead
+     * of `"zh-Hans-SG"`, proving the override genuinely does nothing without
+     * that wiring line. Restored the file from a backup, reran this test and
+     * the full class, confirmed green again.
+     */
+    @Test
+    fun `localeOverrides pins a directory's output locale through the plugin`() {
+        writeBaseBuildFile(projectDir, extraConfig = "localeOverrides.put('zh-rSG', 'zh-Hans-SG')")
+        val zhDir = File(projectDir.toFile(), "src/main/strings/values-zh-rSG").apply { mkdirs() }
+        File(zhDir, "strings.xml").writeText(
+            """
+            <resources>
+                <string name="hello">你好</string>
+            </resources>
+            """.trimIndent(),
+        )
+
+        val result = runner(projectDir, "generateXcstrings").build()
+        assertEquals(TaskOutcome.SUCCESS, result.task(":generateXcstrings")!!.outcome)
+
+        val catalogText = File(projectDir.toFile(), "ios/Shared.xcstrings").readText()
+        assertTrue(
+            catalogText.contains("\"zh-Hans-SG\""),
+            "expected the localeOverrides-pinned locale key to appear in the generated catalog:\n$catalogText",
+        )
+        assertFalse(
+            catalogText.contains("\"zh-SG\""),
+            "the un-overridden mapping (zh-SG) must not appear -- the override must actually take effect:\n$catalogText",
+        )
+    }
 }

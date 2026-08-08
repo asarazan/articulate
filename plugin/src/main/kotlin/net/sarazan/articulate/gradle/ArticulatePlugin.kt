@@ -36,7 +36,6 @@ class ArticulatePlugin : Plugin<Project> {
         extension.sourceLanguage.convention("en")
         extension.markupPolicy.convention(MarkupPolicy.ERROR)
         extension.warningsAsErrors.convention(false)
-        extension.ios.table.convention("Shared")
 
         // Task 4 correctness fix (PLAN.md §13's M4/M5 audit): STRIP/VERBATIM
         // are declared DSL surface (D4) but core always behaves as ERROR

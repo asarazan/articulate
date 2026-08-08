@@ -15,10 +15,9 @@ import javax.inject.Inject
  * (conventionally `:i18n`).
  *
  * Conventions (`stringsDir` = `src/main/strings`, `sourceLanguage` = `"en"`,
- * `markupPolicy` = [MarkupPolicy.ERROR], `warningsAsErrors` = `false`,
- * `ios.table` = `"Shared"`) are set by [ArticulatePlugin.apply], not here, so
- * this class stays a plain property bag with no `Project`/`ProjectLayout`
- * dependency of its own.
+ * `markupPolicy` = [MarkupPolicy.ERROR], `warningsAsErrors` = `false`) are
+ * set by [ArticulatePlugin.apply], not here, so this class stays a plain
+ * property bag with no `Project`/`ProjectLayout` dependency of its own.
  */
 abstract class ArticulateExtension @Inject constructor(objects: ObjectFactory) {
 
@@ -71,7 +70,4 @@ abstract class IosExtension {
 
     /** Path of the committed `.xcstrings` catalog `generateXcstrings`/`verifyStrings` target. */
     abstract val catalog: RegularFileProperty
-
-    /** The Xcode String Catalog's table name. Not consumed by generation/verification (both operate on [catalog] directly); carried for documentation/consumer tooling. */
-    abstract val table: Property<String>
 }

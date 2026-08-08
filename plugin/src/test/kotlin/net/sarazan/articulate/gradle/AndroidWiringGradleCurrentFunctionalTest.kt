@@ -1,12 +1,8 @@
 package net.sarazan.articulate.gradle
 
 import net.sarazan.articulate.gradle.FunctionalTestSupport.COMPILE_SDK
-import net.sarazan.articulate.gradle.FunctionalTestSupport.requireOrSkipAndroidSdk
-import net.sarazan.articulate.gradle.FunctionalTestSupport.writeAndroidAppModule
-import net.sarazan.articulate.gradle.FunctionalTestSupport.writeAndroidSettings
-import net.sarazan.articulate.gradle.FunctionalTestSupport.writeBaseBuildFile
-import net.sarazan.articulate.gradle.FunctionalTestSupport.writeLocalProperties
-import net.sarazan.articulate.gradle.FunctionalTestSupport.writeValidStringsFixture
+import net.sarazan.articulate.gradle.FunctionalTestSupport.requireSdkAndWriteLocalProperties
+import net.sarazan.articulate.gradle.FunctionalTestSupport.writeTwoModuleFixture
 import org.gradle.testkit.runner.GradleRunner
 import org.gradle.testkit.runner.TaskOutcome
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -53,8 +49,7 @@ class AndroidWiringGradleCurrentFunctionalTest {
 
     @BeforeEach
     fun setUp() {
-        val sdk = requireOrSkipAndroidSdk()
-        writeLocalProperties(projectDir, sdk)
+        requireSdkAndWriteLocalProperties(projectDir)
     }
 
     private fun gradleCurrentRunner(vararg args: String): GradleRunner =
@@ -69,19 +64,9 @@ class AndroidWiringGradleCurrentFunctionalTest {
             .withArguments(*args)
             .forwardOutput()
 
-    /** Same shape as [AndroidWiringFunctionalTest.writeTwoModuleFixture], sharing the same [COMPILE_SDK]. */
-    private fun writeTwoModuleFixture(): File {
-        writeAndroidSettings(projectDir)
-        val i18nDir = File(projectDir.toFile(), "i18n").apply { mkdirs() }
-        writeBaseBuildFile(i18nDir.toPath())
-        writeValidStringsFixture(i18nDir.toPath())
-        writeAndroidAppModule(projectDir, compileSdk = COMPILE_SDK)
-        return i18nDir
-    }
-
     @Test
     fun `wrapper Gradle -- generated Android res is registered via DSL srcDir at finalizeDsl and R string resolves it`() {
-        writeTwoModuleFixture()
+        writeTwoModuleFixture(projectDir)
 
         val result = gradleCurrentRunner(":app:compileDebugJavaWithJavac", ":app:compileReleaseJavaWithJavac").build()
 
@@ -119,7 +104,7 @@ class AndroidWiringGradleCurrentFunctionalTest {
 
     @Test
     fun `wrapper Gradle -- resolving articulateAndroidResIncoming for a path alone does not run validateStrings`() {
-        writeTwoModuleFixture()
+        writeTwoModuleFixture(projectDir)
 
         val result = gradleCurrentRunner(":app:help").build()
 
@@ -134,7 +119,7 @@ class AndroidWiringGradleCurrentFunctionalTest {
 
     @Test
     fun `wrapper Gradle -- configuration cache is reused for the Android app path`() {
-        writeTwoModuleFixture()
+        writeTwoModuleFixture(projectDir)
 
         val first = gradleCurrentRunner(":app:compileDebugJavaWithJavac", "--configuration-cache").build()
         assertTrue(
