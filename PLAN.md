@@ -637,6 +637,14 @@ Also established on the way: the dev-loop for IDE-consumed samples is **publish-
 
 **What remains human, recorded not glossed:** Studio rendering. After this lands, a clean sync should resolve `R.string` with no build, because the registered path is the always-on-disk source tree. §4.5's open-defect entry gets amended to "expected fixed by §4.5c, awaiting human Studio confirmation" — it is not VERIFIED until a human syncs and says so.
 
+### 4.5d Razor audit — 2026-08-08, panel-run, adversarially verified
+
+Five-lens panel (dead code, comment razor, API surface, build-script, conventional-alternative prototype) with per-finding adversarial verification. Outcomes:
+
+**The conventional alternative (`:i18n` as a plain `com.android.library` module; companion plugin deleted entirely; ~554 LOC) — DECLINED FOR NOW, recorded not rejected.** Prototyped with a control on the floor: viable, structurally immune to both this week's defect classes (nothing crosses a classloader, nothing can resolve at configuration time), gate survives naturally, D10 becomes structural. Declined because of **CONV-5**: a key defined in both app and i18n is a hard duplicate-resource error today but becomes a **silent per-configuration override** under the library shape — the silent-wrongness class this project refuses. **Revisit trigger:** a mitigation making that collision loud again (e.g. `validateStrings` growing an app-side collision check), or the current mechanism developing another defect. Secondary costs recorded: library-R import ergonomics under `nonTransitiveRClass`, ~12 reflective lines to keep the base plugin AGP-free, AAR pipeline overhead, and the KMP+`com.android.library` deprecation clock.
+
+**Applied by the razor lane:** ~280 confirmed LOC of superseded-mechanism KDoc cut (two blocks with causal detail PLAN lacked moved into 4.5b/4.5c history rather than deleted); `IosExtension.table` **deleted** (set-but-never-read public surface — a consumer setting it silently no-oped, the forbidden hazard; returns only if wired to real behavior); `GenerateXcstringsTask`'s unreachable not-configured guard deleted (13's old finding, twice confirmed); `srcDir(Any)`→`directories` migration (deprecated in AGP 9.1, removal-tracked); test-support dedup; README de-rotted. **Coverage absences turned into red-first tests, not deletions:** the `androidStringsDir`/wiring-mismatch branch (the THIRD AMENDMENT's "loud, not silent" guarantee was asserted, untested) and `localeOverrides` through the plugin.
+
 ### 4.6 Configuration-cache rules — non-negotiable, and the reason M4's audit is Opus
 
 Config-cache violations are the archetypal silent failure: everything works until someone enables the cache, then breaks confusingly and far from the cause.
