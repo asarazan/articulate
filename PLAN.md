@@ -1112,6 +1112,20 @@ Apply the `signing` plugin with **in-memory keys** (`useInMemoryPgpKeys`) so CI 
 6. `release.yml` gains a Central step behind the **same** typed-`publish` confirmation gate, failing loudly and early if any required secret is absent.
 7. **Not provable headlessly** — say so rather than claiming it: actual Central deployment validation and the post-sync resolve from `mavenCentral()` are human steps after real credentials exist.
 
+### 16.6 Implementation findings — 2026-08-09, gate passed
+
+**`com.gradle.plugin-publish` already signs its own publications** the instant the `signing` plugin is applied — verified empirically (`sign*MavenPublication` tasks exist with nmcp fully removed and no `sign()` call anywhere). So this build must NOT call `sign(publishing.publications)` itself: the wiring already exists, and duplicating it risks non-idempotent double-signing. Our signing block's only job is conditionally supplying the signatory via `useInMemoryPgpKeys`. This was not in §16.2 and is the kind of thing that would have looked like a missing line to a future reader.
+
+**GPG key `CF0DF41A6C04AD37`: not expired, present on the SKS-pool keyservers** (keyserver.ubuntu.com, pgp.mit.edu) which is what Central validates against. Absent from keys.openpgp.org, which requires opt-in email enrollment — not a blocker.
+
+**nmcp API**: 1.6.1's single-project entry point is `publishAllPublicationsToCentralPortal`, which is `@Deprecated` in favor of the `com.gradleup.nmcp.aggregation` multi-project plugin. We use the deprecated single-project function deliberately — aggregation is a multi-project mechanism this build does not need, and switching to it is the architecture change §16.1 forbids reaching for without cause. Revisit if the function is removed.
+
+**`publishingType = USER_MANAGED`**, not nmcp's `AUTOMATIC` default: the upload validates and then waits for a human to press Publish in the Portal UI. Matches this project's posture on irreversible actions everywhere else.
+
+**Gate results (all passed, 2026-08-09):** exactly the three expected publications and nothing else; both marker POMs depend on `net.sarazan.articulate:articulate-gradle-plugin:0.1.0`; all ten required fields present in all three POMs; **7/7 `.asc` signatures verified** by `gpg --verify` (using a disposable throwaway key, since real credentials are reserved to the human); **68/68 checksums** recomputed and matched; bundle assembled locally (45 entries, no network task in the graph); unsigned `publishToMavenLocal` succeeds with signing tasks SKIPPED; `publishPlugins --validate-only` still green; 252/0/0.
+
+**Still human-only, unchanged:** signing with the real key, actual Central deployment, the post-sync resolve from `mavenCentral()`, and a real `release.yml` dispatch.
+
 ### 16.5 THE LOCAL PROOF GATE — no network publish until every item passes
 
 **Published coordinates are immutable. A wrong artifactId, a missing POM field, or an unverifiable signature is permanent for that version.** This repo has already shipped one near-miss of exactly this class: `archivesName` was set without the publication `artifactId`, and the build went green while publishing under the wrong name. Everything below is provable offline; therefore all of it is proven offline, **before any task that touches the network runs**.

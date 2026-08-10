@@ -18,3 +18,10 @@ kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 # D11: Gradle Plugin Portal first. Also produces the Maven publications, so
 # adding Central later needs no restructuring.
 plugin-publish = { id = "com.gradle.plugin-publish", version = "1.3.1" }
+# §16.1: the Central Portal publisher. Chosen over com.vanniktech.maven.publish
+# because plugin-publish already produces correct publications (pluginMaven +
+# two markers) -- nmcp uploads *existing* publications to the Central Portal
+# API, so the delta is additive and minimal (consistent with §4.5d's razor).
+# vanniktech expects to own publication configuration and can conflict with
+# plugin-publish's three publications. Verified 1.6.1 is current (2026-08-10).
+nmcp = { id = "com.gradleup.nmcp", version = "1.6.1" }

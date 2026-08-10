@@ -13,6 +13,12 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
     `java-gradle-plugin`
     alias(libs.plugins.plugin.publish)
+    // §16.1: additive to plugin-publish's three publications -- uploads them
+    // to the Central Portal, does not create its own.
+    alias(libs.plugins.nmcp)
+    // §16.2: in-memory keys so CI needs no keyring file. Configured below,
+    // conditional on credentials being present -- see the trap this guards.
+    signing
 }
 
 // Publishing coordinates. 0.1.0 deliberately, not 1.0.0: `markupPolicy` accepts
@@ -66,8 +72,85 @@ publishing {
                         distribution.set("repo")
                     }
                 }
+                // Maven Central requires <developers> and <scm> on every
+                // published POM; the Portal path (Gradle Plugin Portal) never
+                // needed them, so they were absent until §16 (PLAN.md).
+                // Verified 2026-08-10 by reading the generated POMs under
+                // ~/.m2 -- this was the only metadata gap (§16.0).
+                developers {
+                    developer {
+                        id.set("asarazan")
+                        name.set("Aaron Sarazan")
+                        email.set("aaron@sarazan.net")
+                        url.set("https://github.com/asarazan")
+                    }
+                }
+                scm {
+                    connection.set("scm:git:git://github.com/asarazan/articulate.git")
+                    developerConnection.set("scm:git:ssh://github.com/asarazan/articulate.git")
+                    url.set("https://github.com/asarazan/articulate")
+                }
             }
         }
+    }
+}
+
+// §16.1: nmcp uploads plugin-publish's *existing* publications (pluginMaven +
+// both `*.gradle.plugin` markers) to the Central Portal -- it creates no
+// publications of its own, so nothing above needed to change. Credentials
+// read from Gradle properties, never hardcoded (§16.3: human sets these in
+// ~/.gradle/gradle.properties or CI secrets; agents never read or set the
+// values). Absent properties resolve to an unset Provider, which only fails
+// the build if a Central-Portal-uploading task is actually invoked -- see
+// nmcp's own `taskGraph.whenReady` check -- so this block does not disturb
+// `publishToMavenLocal` or any other task that doesn't touch the network.
+//
+// `publishAllPublicationsToCentralPortal` is nmcp 1.6.1's single-project API
+// -- deprecated in favor of the `com.gradleup.nmcp.aggregation` plugin, whose
+// job is combining publications from *multiple* projects into one deployment.
+// This module publishes all three of its own publications in one project, so
+// aggregation buys nothing here and would be the architecture change §16.1
+// says to avoid reaching for without cause; the deprecated function remains
+// nmcp's documented single-project entry point and is exercised by nmcp's
+// own test suite.
+nmcp {
+    @Suppress("DEPRECATION")
+    publishAllPublicationsToCentralPortal {
+        username.set(providers.gradleProperty("mavenCentralUsername"))
+        password.set(providers.gradleProperty("mavenCentralPassword"))
+        // USER_MANAGED, not the nmcp default AUTOMATIC: matches this repo's
+        // posture on irreversible actions (see release.yml's Portal job) --
+        // the deployment is validated and uploaded, but a human still visits
+        // the Central Portal UI to press "Publish" once it looks right.
+        publishingType.set("USER_MANAGED")
+    }
+}
+
+// §16.2 -- THE TRAP: signing must never break `publishToMavenLocal` (the dev
+// loop; showcase/ and every consumer-compatibility check run through it).
+//
+// No explicit `sign(publishing.publications)` call here: `com.gradle.plugin-publish`
+// has signed its own publications automatically since 1.0.0 the moment the
+// `signing` plugin is applied to the project (verified 2026-08-10 --
+// `signPluginMavenPublication` / `signArticulatePluginMarkerMavenPublication` /
+// `signArticulateAndroidPluginMarkerMavenPublication` all appear in
+// `:plugin:tasks --all` from applying `signing` alone, with no `sign(...)`
+// call anywhere in this file). Calling `sign()` a second time here would
+// duplicate that wiring for no benefit and risks the double-signing failure
+// mode tracked upstream at gradle/gradle#21857. This block's only job is
+// supplying the signatory: `isRequired` gated on both properties being
+// present, and `useInMemoryPgpKeys` called only then, so an unconfigured
+// signatory never gets asked to sign anything.
+//
+// Proven by §16.5 item 7: with these properties unset, plugin-publish's
+// Sign tasks report SKIPPED (not required, no signatory) and
+// `publishToMavenLocal` succeeds.
+val signingKey = providers.gradleProperty("signingInMemoryKey")
+val signingKeyPassword = providers.gradleProperty("signingInMemoryKeyPassword")
+signing {
+    isRequired = signingKey.isPresent && signingKeyPassword.isPresent
+    if (signingKey.isPresent && signingKeyPassword.isPresent) {
+        useInMemoryPgpKeys(signingKey.get(), signingKeyPassword.get())
     }
 }
 
