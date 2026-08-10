@@ -1112,6 +1112,25 @@ Apply the `signing` plugin with **in-memory keys** (`useInMemoryPgpKeys`) so CI 
 6. `release.yml` gains a Central step behind the **same** typed-`publish` confirmation gate, failing loudly and early if any required secret is absent.
 7. **Not provable headlessly** — say so rather than claiming it: actual Central deployment validation and the post-sync resolve from `mavenCentral()` are human steps after real credentials exist.
 
+### 16.5 THE LOCAL PROOF GATE — no network publish until every item passes
+
+**Published coordinates are immutable. A wrong artifactId, a missing POM field, or an unverifiable signature is permanent for that version.** This repo has already shipped one near-miss of exactly this class: `archivesName` was set without the publication `artifactId`, and the build went green while publishing under the wrong name. Everything below is provable offline; therefore all of it is proven offline, **before any task that touches the network runs**.
+
+**Publish to a local `file://` repository, not `mavenLocal()`.** mavenLocal has different layout and metadata semantics (no checksums, lenient handling) and will hide exactly the defects this gate exists to catch. Add a throwaway `maven { url = file("build/local-publish-proof") }` repository, publish all publications there, and assert against those files.
+
+Every item is an assertion on **files on disk**, never on the DSL's intent:
+
+1. **Coordinate enumeration.** List every artifact produced, with full `group:artifact:version` and classifier. Expect exactly three publications: `net.sarazan.articulate:articulate-gradle-plugin:0.1.0` (jar, sources, javadoc, pom, module) and the two markers `net.sarazan.articulate:net.sarazan.articulate.gradle.plugin:0.1.0` and `net.sarazan.articulate.android:net.sarazan.articulate.android.gradle.plugin:0.1.0` (pom only). **Any coordinate not on that list is a stop-and-report** — an unexpected artifact is as dangerous as a missing one.
+2. **Marker correctness.** Each marker POM's dependency must point at `net.sarazan.articulate:articulate-gradle-plugin:0.1.0`. A wrong marker means `plugins { id(...) }` resolves to nothing.
+3. **POM completeness, field by field, per POM**: `groupId`, `artifactId`, `version`, `packaging`, `name`, `description`, `url`, `licenses`, `developers`, `scm`. Print each POM in full in the report — a human reads them before anything ships.
+4. **Signature verification, not signature presence.** For every artifact: an `.asc` exists AND `gpg --verify` actually passes against it. A present-but-invalid signature fails Central and is worse than none.
+5. **Checksums** present and correct for every artifact.
+6. **Bundle inspection.** If nmcp can assemble the Central bundle locally without uploading, produce it and list its contents; the bundle is what Central actually receives.
+7. **The unsigned-local-publish proof** (§16.2's trap): `publishToMavenLocal` with signing credentials absent still succeeds.
+8. **Portal path unaffected**: `publishPlugins --validate-only` still green.
+
+**Absolute rule for whoever implements this: run no network publishing task.** Not `publishPlugins`, not `publishAllPublicationsToMavenCentralRepository`, not nmcp's upload task, not `--dry-run` variants that still authenticate. `--validate-only` on the Portal path is the sole exception, and only because it is already part of CI. The human presses the button, once, after reading the gate's output.
+
 
 ## 15. Showcase app — SPEC, 2026-08-06
 
