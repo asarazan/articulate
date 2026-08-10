@@ -1,3 +1,18 @@
+# Articulate showcase
+
+A runnable proof of [Articulate](../README.md)'s value prop (PLAN.md §15): native SwiftUI on
+iOS, Jetpack Compose (no Compose Multiplatform) on Android, and one shared `strings.xml` source
+of truth for copy on both. `showcase/androidApp` and `showcase/iosApp` render the same
+"Checklist" app from the same `:i18n` module; `showcase/sharedLogic` carries the presenter and
+domain logic, never copy strings, per §14's sealed-type pattern.
+
+This is also a real, separately-wrappered composite build in its own right — its own
+`./gradlew`, own version catalog, `pluginManagement { includeBuild("..") }` against the plugin
+under development — exercised in CI by the `showcase-human-path` job (`ci.yml`, PLAN.md §15.5).
+iOS is not built in CI (Linux-only runners); see §15.7 for the human checklist that covers it.
+
+What follows is the standard Kotlin Multiplatform wizard README for this project's layout.
+
 This is a Kotlin Multiplatform project targeting Android, iOS.
 
 * [/iosApp](./iosApp/iosApp) contains an iOS application. Even if you’re sharing your UI with Compose Multiplatform,
@@ -29,6 +44,16 @@ Use the run button in your IDE's editor gutter, or run tests using Gradle tasks:
 
 - Android tests: `./gradlew :sharedUI:testAndroidHostTest :sharedLogic:testAndroidHostTest`
 - iOS tests: `./gradlew :sharedLogic:iosSimulatorArm64Test`
+
+### Screenshots
+
+_Slot for PLAN.md §15.7's human step: screenshots of both platforms, in `de` and `zh-Hans`, land_
+_here once someone has run the Android app and built/run the iOS app in Xcode._
+
+| | Android | iOS |
+|---|---|---|
+| `de` | _(pending)_ | _(pending)_ |
+| `zh-Hans` | _(pending)_ | _(pending)_ |
 
 ---
 

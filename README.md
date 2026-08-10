@@ -179,6 +179,8 @@ Honest accounting, since this is a v0:
 - [`PLAN.md`](PLAN.md) — the spec of record: milestones, decisions and their reasoning.
 - [`docs/swiftpm.md`](docs/swiftpm.md) — what works and what does not under `swift build`.
 - [`sample/`](sample/) — a runnable composite build; open it directly in Android Studio.
+- [`showcase/`](showcase/) — a marketing-grade demo (native SwiftUI + Jetpack Compose + one shared
+  `strings.xml`); see its README for the human steps (Xcode, screenshots) `sample/` doesn't need.
 - [`AGENTS.md`](AGENTS.md) — how to work in this repo, and the rules that exist because they caught
   something real.
 

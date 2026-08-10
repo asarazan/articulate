@@ -1192,7 +1192,9 @@ No coroutines/Flow in the Swift-facing API. Presenter returns **domain outcomes 
 - **Build plumbing:** own composite build (`pluginManagement { includeBuild("../..") }`-equivalent from `showcase/`), own version catalog + wrapper, per-module `alias()` plugin blocks (modern consumer shape; the classloader-fixture shape belongs to `sample/` alone). Switch to published Portal coordinates after 0.1.0 ships (tracked TODO in its settings file).
 
 ### 15.5 CI
-Add `showcase-human-path` mirroring the sample job: `cd showcase && ./gradlew :androidApp:assembleDebug :i18n:verifyStrings` (own wrapper, SDK 37). iOS is **not** in CI by design (Linux-only CI, D2); the human checklist in 15.7 covers it.
+Add `showcase-human-path` mirroring the sample job: `cd showcase && ./gradlew :androidApp:assembleDebug :i18n:verifyStrings` (own wrapper). iOS is **not** in CI by design (Linux-only CI, D2); the human checklist in 15.7 covers it.
+
+**AMENDED 2026-08-10 (lane D, oracle-verified):** this line originally said "SDK 37", copied from `sample-human-path`'s package list without checking `showcase/gradle/libs.versions.toml`, which pins `android-compileSdk = "36"`. Verified by actually running the build with only platform 37 installed: it fails with `Failed to find target with hash string 'android-36'`. The CI job installs `platforms;android-36` (not 37) accordingly. If `showcase`'s `compileSdk` is later bumped to 37 for parity with `sample/`, update the CI job's SDK package alongside it.
 
 ### 15.6 Distribution lanes (worktree-parallel; A blocks B/C; D last)
 - **A0 (human, AMENDED 2026-08-07): seed `showcase/` from the KMP wizard directly** — kmp.jetbrains.com, Android ✓ + iOS ✓, **native UI (SwiftUI), never the shared-UI/CMP option**, committed **pristine and unmodified**. Rationale: the wizard output is the ecosystem's real shape, its `iosApp.xcodeproj` arrives correctly wired to the real shared module from birth (no graft, no path reconciliation), and the git history from this commit forward *is* the integration guide — commit 1 is a normal KMP project, everything after is what adopting Articulate looks like. Supersedes the scratch-dir/graft plan.
