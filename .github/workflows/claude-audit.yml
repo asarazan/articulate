@@ -1,0 +1,116 @@
+# ======================================================================================
+# Workflow: Claude audit of agent-authored PRs
+# ======================================================================================
+# The automated Tier-1 gate: every PR opened by a bot (Oz, Claude, or any
+# other agent) gets an independent adversarial audit before a human merges.
+# Runs anthropics/claude-code-action in automation mode with the audit
+# methodology defined in .claude/agents/agent-pr-auditor.md -- claim
+# enumeration first, CONFIRMED-means-reproduced, oracle version recorded per
+# finding, report-only. The report lands as a PR comment with the claim
+# table that feeds the claim-survival metric.
+#
+# Why a separate workflow from claude.yml: the auditor must never share
+# context with the implementer (AGENTS.md "The auditor must never be the
+# implementer"). A fresh automation-mode run with a fixed prompt has no
+# implementer context by construction -- and when the implementer is another
+# vendor's agent, the separation is total.
+#
+# workflow_dispatch exists for manual re-audits (e.g. after a fix push, or
+# to audit a human PR on demand): Actions tab -> this workflow -> Run
+# workflow -> enter the PR number.
+# ======================================================================================
+name: Claude Audit
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to audit"
+        required: true
+
+concurrency:
+  group: claude-audit-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  audit:
+    # Bot-authored PRs only on the automatic trigger; workflow_dispatch is
+    # unconditional (a human explicitly asked).
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.user.type == 'Bot'
+    runs-on: ubuntu-latest
+    # The audit re-runs the full suite plus targeted mutation re-proofs and
+    # oracle compiles; CI's plugin tier alone is up to ~45m.
+    timeout-minutes: 90
+    permissions:
+      # Read-only contents: the auditor reports, never fixes, never pushes.
+      # Mutation tests happen on the runner's disposable checkout only.
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    env:
+      ARTICULATE_REQUIRE_ANDROID_SDK: "true"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # PR head, not the synthetic merge ref -- the audit certifies what
+          # the agent actually authored. Empty on workflow_dispatch, where
+          # the prompt has Claude check out the PR itself.
+          ref: ${{ github.event.pull_request.head.sha || '' }}
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-37.0
+            build-tools;36.0.0
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Verify oracle availability
+        run: scripts/oracle.sh aapt2
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The action rejects bot actors by default (anti-loop guard). This
+          # workflow's whole purpose is running on bot-authored PRs, so allow
+          # them all: the trigger surface (pull_request opened/ready only --
+          # never comments, never pushes) is what bounds loop risk, since the
+          # audit itself opens no PRs.
+          allowed_bots: "*"
+          prompt: |
+            Read .claude/agents/agent-pr-auditor.md and perform exactly that
+            audit against PR #${{ github.event.pull_request.number || inputs.pr_number }}
+            of ${{ github.repository }}.
+
+            The PR head is already checked out in the working directory on
+            pull_request runs; on a manual dispatch run, check it out first
+            with `gh pr checkout ${{ inputs.pr_number }}`.
+
+            Resolve the aapt2 oracle via scripts/oracle.sh (already verified
+            present on this runner). xcstringstool is structurally absent on
+            Linux -- record any xcstrings-side checks as NOT VERIFIED with
+            that reason rather than skipping silently.
+
+            When the audit is complete, post the full report (verdict, claim
+            table, claim-survival n/m, absences, not-verified list, tree
+            attestation) as ONE PR comment via `gh pr comment`. Do not push,
+            do not fix, do not open PRs -- report only, per the agent
+            definition's boundaries.
+          claude_args: |
+            --allowedTools "Bash,Read,Grep,Glob,Edit,Write"
