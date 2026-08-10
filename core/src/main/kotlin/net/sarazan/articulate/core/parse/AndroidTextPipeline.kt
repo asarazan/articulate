@@ -84,8 +84,14 @@ internal object AndroidTextPipeline {
             // at every span start and end. A `while`, not an `if`, because an
             // empty span (`<b></b>`) or two adjacent spans contribute equal
             // or consecutive offsets that must all fire before index [i]
-            // advances.
-            while (boundaryIndex < spanBoundaries.size && spanBoundaries[boundaryIndex] == i) {
+            // advances. Compares with `<=`, not `==`: [i] advances by more
+            // than one inside the escape branch below (2 for `\n`, 6 for
+            // `\uXXXX`), so a boundary offset that lands inside an escape is
+            // skipped over and would never equal [i] again -- draining with
+            // `<=` still fires it (once [i] catches up or passes it) instead
+            // of wedging [boundaryIndex] there forever and silently disabling
+            // every later boundary reset in the string.
+            while (boundaryIndex < spanBoundaries.size && spanBoundaries[boundaryIndex] <= i) {
                 lastWasCollapsedSpace = false
                 quoted = false
                 boundaryIndex++

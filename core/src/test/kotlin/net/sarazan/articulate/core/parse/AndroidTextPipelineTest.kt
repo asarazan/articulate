@@ -163,4 +163,48 @@ class AndroidTextPipelineTest {
     fun `W2 control - the same text trims normally with no span present`() {
         assertEquals("x y", process("  x  y  "))
     }
+
+    /**
+     * PR #23 audit (2026-08-10): the boundary-drain loop in [AndroidTextPipeline]
+     * compared `spanBoundaries[boundaryIndex] == i`, but [i] advances by more
+     * than one inside the escape branch (2 for `\n`, 6 for `\uXXXX`). A
+     * boundary offset landing inside an escape was skipped over and never
+     * equalled [i] again, wedging [boundaryIndex] there forever -- every
+     * later boundary reset in the string was silently disabled.
+     *
+     * This reproduces `a\<b>n</b>x <i> y </i> z` (flattened by [ContentFlattener]
+     * to raw text `a\nx  y  z` with a literal backslash+n, NOT an escape, at
+     * indices 1-2 -- the escape only exists once [AndroidTextPipeline] walks
+     * the flattened stream). Byte-for-byte, raw text and boundaries are:
+     *
+     * index:  0    1    2    3    4    5    6    7    8    9
+     * char:   a    \    n    x    ' '  ' '  y    ' '  ' '  z
+     *
+     * boundaries = [2, 3] (the stripped `<b>`, bracketing "n") and [5, 8]
+     * (the stripped `<i>`, bracketing " y ").
+     *
+     * Walking it: `\n` at indices 1-2 is a real escape here (backslash
+     * followed by 'n'), consuming both and emitting an actual newline
+     * (0x0A) -- so [i] jumps from 1 to 3, stepping over boundary offset 2
+     * without ever equaling it. With the old `==` check this wedged
+     * [boundaryIndex] at the `<b>` boundaries forever, silently disabling
+     * the `<i>` boundaries at 5 and 8 too -- collapsing " y " to a single
+     * space on both sides instead of preserving the double space M2 requires.
+     *
+     * This is a direct unit-level reproduction of the real aapt2 2.20
+     * divergence recorded in the PR #23 audit; per the audit, the fix does
+     * NOT make the head of this input match aapt2 -- aapt2 processes escapes
+     * per-chunk (never crossing a stripped tag boundary), so real aapt2
+     * treats the lone trailing backslash before `<b>` as E3 (dropped) rather
+     * than combining it with `<b>`'s content into a `\n` escape. That
+     * divergence is a separate, pre-existing, out-of-scope bug (per-chunk
+     * escaping is not implemented here at all). This test asserts only what
+     * the boundary-drain fix owns: that the `<i>` double-spaces survive an
+     * earlier boundary landing inside an escape, not full aapt2 parity for
+     * this input.
+     */
+    @Test
+    fun `boundary index bug - an escape-adjacent boundary does not wedge later resets`() {
+        assertEquals("a\nx  y  z", processSpanned("a\\nx  y  z", listOf(2, 3, 5, 8)))
+    }
 }
