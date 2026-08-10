@@ -54,21 +54,23 @@ EOF
 
     # Glob every version directory that actually contains an executable
     # aapt2, and pick the highest version -- never hardcode a version number,
-    # so this survives an SDK update. Compare numerically on the (up to)
-    # three dot-separated fields of an Android build-tools version.
-    highest_version=""
-    for entry in "$build_tools_dir"/*/; do
-        [ -d "$entry" ] || continue
-        version=$(basename "$entry")
-        candidate="$build_tools_dir/$version/aapt2"
-        [ -x "$candidate" ] || continue
-        if [ -z "$highest_version" ]; then
-            highest_version="$version"
-        else
-            highest_version=$(printf '%s\n%s\n' "$version" "$highest_version" |
-                sort -t. -k1,1n -k2,2n -k3,3n | tail -n1)
-        fi
-    done
+    # so this survives an SDK update. Each candidate is reduced to a
+    # zero-padded sortable key over its (up to) three numeric fields, plus a
+    # final flag ranking a release build above a pre-release of the same
+    # version: bare `sort -k1,1n -k2,2n -k3,3n` ties 35.0.0 with 35.0.0-rc4
+    # on all numeric keys and then last-resort-compares the raw strings,
+    # silently picking the rc -- observed 2026-08-10, and exactly the
+    # wrong-oracle-version hazard this script exists to prevent.
+    highest_version=$(
+        for entry in "$build_tools_dir"/*/; do
+            [ -d "$entry" ] || continue
+            version=$(basename "$entry")
+            candidate="$build_tools_dir/$version/aapt2"
+            [ -x "$candidate" ] || continue
+            printf '%s\n' "$version" | awk -F'[.-]' \
+                '{ printf "%05d.%05d.%05d.%d %s\n", $1, $2, $3, (index($0, "-") ? 0 : 1), $0 }'
+        done | sort | tail -n1 | cut -d' ' -f2
+    )
 
     if [ -z "$highest_version" ]; then
         cat >&2 <<EOF
