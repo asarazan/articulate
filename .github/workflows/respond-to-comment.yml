@@ -41,6 +41,9 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
+      # Required in addition to contents: write for the agent to be able to
+      # create or modify files under .github/workflows/ (e.g. ci.yml).
+      workflows: write
     steps:
       - name: Checkout Action
         uses: actions/checkout@v4
