@@ -1080,6 +1080,39 @@ D2's third test tier is a `sample/` composite build as an end-to-end smoke. This
 
 ---
 
+## 16. Maven Central publishing — SPEC, 2026-08-09
+
+**D11 stands: Portal first, Central second.** This section specs Central only; it must not disturb the Portal path (issue #20), which is the canonical discovery route for `plugins { id(...) }`.
+
+### 16.0 Established facts (verified 2026-08-09, do not re-derive)
+- **Namespace `net.sarazan` is verified** on central.sonatype.com (migrated from OSSRH). Both plugin-marker groups (`net.sarazan.articulate`, `net.sarazan.articulate.android`) are subgroups and are therefore covered.
+- **GPG secret key exists**: `rsa2048/CF0DF41A6C04AD37`, uid `Aaron Sarazan <aaron@sarazan.net>`, created 2020-07-27. Whether it is **published to a keyserver** and **unexpired** is UNVERIFIED — check both before anything else; Central rejects signatures it cannot verify.
+- **Three publications exist today**, all produced by `com.gradle.plugin-publish`: `pluginMaven` (artifactId `articulate-gradle-plugin`) + two `*.gradle.plugin` markers. Sources and javadoc jars are already generated.
+- **The only POM metadata gap is `<developers>` and `<scm>`** — verified by reading the generated POMs in `~/.m2`. `name`/`description` are already propagated to markers by plugin-publish; `url`/`licenses` are already set by the existing `configureEach` block. Do not restructure that block; extend it.
+- `core` is **not published** — bundled into the plugin jar by design (`bundledCore`).
+
+### 16.1 Mechanism — additive, not replacing
+Use **`com.gradleup.nmcp`** (Central Portal publisher). Rationale: plugin-publish already produces correct publications; nmcp uploads *existing* publications to the Central Portal API, so the delta is minimal — consistent with §4.5d's razor. **Do NOT reach for `com.vanniktech.maven.publish` first**: it expects to own publication configuration and can conflict with plugin-publish's three publications. If nmcp cannot handle the marker publications, STOP and report rather than silently switching mechanisms — that is an architecture change, not an implementation detail.
+
+### 16.2 Signing — and the trap that must not be sprung
+Apply the `signing` plugin with **in-memory keys** (`useInMemoryPgpKeys`) so CI needs no keyring file.
+
+**THE TRAP, explicitly: signing must never break `publishToMavenLocal`.** That task is the project's dev loop — `showcase/` consumes the plugin from mavenLocal, and every consumer-compatibility check in this repo runs through it. Signing must be **conditional on credentials being present** (`isRequired = false`, or gate on the signing properties existing), so a developer with no GPG env can still `publishToMavenLocal`. **Acceptance requires proving this**: run `publishToMavenLocal` with no signing properties set and confirm it succeeds.
+
+### 16.3 Credentials (human steps — agents never read or set credential values)
+- Central Portal **user token** (Account → Generate User Token — *not* the legacy OSSRH password) → `mavenCentralUsername` / `mavenCentralPassword` in `~/.gradle/gradle.properties`, and as repo secrets for CI.
+- GPG: `signingInMemoryKey` (ASCII-armored private key) + `signingInMemoryKeyPassword`, likewise.
+
+### 16.4 Acceptance
+1. `<developers>` and `<scm>` present in **all three** POMs — assert by reading the generated files, not by trusting the DSL.
+2. `.asc` signatures exist for **every** artifact of every publication (jar, sources, javadoc, pom, module metadata).
+3. `publishToMavenLocal` succeeds **with signing credentials absent** (§16.2's trap).
+4. Existing Portal path unaffected: `publishPlugins --validate-only` still green.
+5. Root suite unchanged (252/0/0) — this is build-script work and must not move the test count.
+6. `release.yml` gains a Central step behind the **same** typed-`publish` confirmation gate, failing loudly and early if any required secret is absent.
+7. **Not provable headlessly** — say so rather than claiming it: actual Central deployment validation and the post-sync resolve from `mavenCentral()` are human steps after real credentials exist.
+
+
 ## 15. Showcase app — SPEC, 2026-08-06
 
 ### 15.0 Purpose and non-goals
