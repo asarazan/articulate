@@ -41,9 +41,6 @@ jobs:
       contents: write
       pull-requests: write
       issues: write
-      # Required in addition to contents: write for the agent to be able to
-      # create or modify files under .github/workflows/ (e.g. ci.yml).
-      workflows: write
     steps:
       - name: Checkout Action
         uses: actions/checkout@v4
@@ -172,25 +169,36 @@ jobs:
 
       - name: Commit and Push Changes
         if: success()
+        id: commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "Oz Agent"
           git config user.email "agent@warp.dev"
 
-          if [[ -n $(git status --porcelain) ]]; then
-            git add .
+          # GitHub blocks GITHUB_TOKEN from writing to .github/workflows/ no
+          # matter what `permissions:` grants -- it's a hard platform
+          # restriction, not something a scope can unlock. Exclude any such
+          # changes from the automated push so the rest of the fix can still
+          # land; note them for manual follow-up instead.
+          WORKFLOW_FILES=$(git status --porcelain -- .github/workflows | awk '{print $2}' | paste -sd ', ' -)
+          git add -- . ':!.github/workflows'
+
+          if ! git diff --cached --quiet; then
             git commit -m "Oz Agent: Address comment"
             git push
           else
             echo "No changes to commit."
           fi
 
+          echo "workflow_files=$WORKFLOW_FILES" >> "$GITHUB_OUTPUT"
+
       - name: Reply to Comment
         if: success()
         uses: actions/github-script@v7
         env:
           AGENT_OUTPUT: ${{ steps.agent.outputs.agent_output }}
+          WORKFLOW_FILES: ${{ steps.commit.outputs.workflow_files }}
         with:
           github-token: ${{ github.token }}
           script: |
@@ -211,7 +219,11 @@ jobs:
               }
             }
 
-            const content = (lastText || raw || '').trim();
+            let content = (lastText || raw || '').trim();
+            const workflowFiles = process.env.WORKFLOW_FILES || '';
+            if (workflowFiles) {
+              content += `\n\n⚠️ Not included: changes to \`${workflowFiles}\` — GitHub blocks this automation from writing to \`.github/workflows/\`. A maintainer will need to apply that part manually.`;
+            }
             if (!content) {
               core.info('No agent output to reply with.');
               return;

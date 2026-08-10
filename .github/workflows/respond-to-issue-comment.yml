@@ -38,9 +38,6 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
-      # Required in addition to contents: write for the agent to be able to
-      # create or modify files under .github/workflows/ (e.g. ci.yml).
-      workflows: write
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
@@ -111,7 +108,21 @@ jobs:
           git config user.email "agent@warp.dev"
 
           git checkout -b "$BRANCH_NAME"
-          git add .
+
+          # GitHub blocks GITHUB_TOKEN from writing to .github/workflows/ no
+          # matter what `permissions:` grants -- it's a hard platform
+          # restriction, not something a scope can unlock. Exclude any such
+          # changes from the automated commit so the rest of the fix can still
+          # land; note them for manual follow-up instead.
+          WORKFLOW_FILES=$(git status --porcelain -- .github/workflows | awk '{print $2}' | paste -sd ', ' -)
+          git add -- . ':!.github/workflows'
+
+          if git diff --cached --quiet; then
+            echo "Only .github/workflows changes were made; the bot token cannot push those."
+            echo "workflow_files=$WORKFLOW_FILES" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           git commit -m "Oz Agent: address comment on Issue #$ISSUE_NUMBER"
           git push origin "$BRANCH_NAME" --force
 
@@ -123,6 +134,7 @@ jobs:
           PR_URL=$(gh pr create --title "$TITLE" --body "$BODY" --base main --head "$BRANCH_NAME")
           echo "Created PR: $PR_URL"
           echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+          echo "workflow_files=$WORKFLOW_FILES" >> "$GITHUB_OUTPUT"
 
       - name: Reply to Comment
         if: success()
@@ -130,6 +142,7 @@ jobs:
         env:
           AGENT_OUTPUT: ${{ steps.agent.outputs.agent_output }}
           PR_URL: ${{ steps.pr.outputs.pr_url }}
+          WORKFLOW_FILES: ${{ steps.pr.outputs.workflow_files }}
         with:
           github-token: ${{ github.token }}
           script: |
@@ -154,6 +167,10 @@ jobs:
             const prUrl = process.env.PR_URL || '';
             if (prUrl) {
               content += `\n\nI opened a fix here: ${prUrl}`;
+            }
+            const workflowFiles = process.env.WORKFLOW_FILES || '';
+            if (workflowFiles) {
+              content += `\n\n⚠️ Not included: changes to \`${workflowFiles}\` — GitHub blocks this automation from writing to \`.github/workflows/\`. A maintainer will need to apply that part manually.`;
             }
 
             if (!content) {
