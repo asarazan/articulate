@@ -1,6 +1,7 @@
 package net.sarazan.articulate.gradle.tasks
 
 import net.sarazan.articulate.core.convert.AndroidToXcstringsConverter
+import net.sarazan.articulate.core.convert.MarkupPolicy
 import net.sarazan.articulate.core.serialize.XcstringsWriter
 import net.sarazan.articulate.gradle.reportDiagnostics
 import org.gradle.api.DefaultTask
@@ -52,6 +53,9 @@ abstract class VerifyStringsTask : DefaultTask() {
     abstract val localeOverrides: MapProperty<String, String>
 
     @get:Input
+    abstract val markupPolicy: Property<MarkupPolicy>
+
+    @get:Input
     abstract val warningsAsErrors: Property<Boolean>
 
     /**
@@ -72,7 +76,7 @@ abstract class VerifyStringsTask : DefaultTask() {
     @TaskAction
     fun verify() {
         val sourceDir = stringsDir.get().asFile
-        val result = AndroidToXcstringsConverter.convert(sourceDir, sourceLanguage.get(), localeOverrides.get())
+        val result = AndroidToXcstringsConverter.convert(sourceDir, sourceLanguage.get(), localeOverrides.get(), markupPolicy.get())
         reportDiagnostics(logger, result.diagnostics, warningsAsErrors.get(), "verifyStrings")
 
         // Vacuous-gate guard (§5, adopted from ListenUp): a gate that

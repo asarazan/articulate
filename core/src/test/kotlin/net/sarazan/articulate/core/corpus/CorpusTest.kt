@@ -1,6 +1,7 @@
 package net.sarazan.articulate.core.corpus
 
 import net.sarazan.articulate.core.convert.AndroidToXcstringsConverter
+import net.sarazan.articulate.core.convert.MarkupPolicy
 import net.sarazan.articulate.core.diagnostics.Diagnostic
 import net.sarazan.articulate.core.serialize.XcstringsWriter
 import org.junit.jupiter.api.Assertions.assertArrayEquals
@@ -57,17 +58,34 @@ class CorpusTest {
         check(inputDir.isDirectory) { "corpus case '${dir.name}' is missing an input/ directory" }
         val expectedXcstrings = File(dir, "expected.xcstrings")
         val expectedError = File(dir, "expected-error.txt")
+        val markupPolicy = readMarkupPolicy(dir)
 
         when {
-            expectedXcstrings.isFile -> runSuccessCase(dir.name, inputDir, expectedXcstrings)
-            expectedError.isFile -> runErrorCase(dir.name, inputDir, expectedError)
+            expectedXcstrings.isFile -> runSuccessCase(dir.name, inputDir, expectedXcstrings, markupPolicy)
+            expectedError.isFile -> runErrorCase(dir.name, inputDir, expectedError, markupPolicy)
             else -> fail<Unit>("corpus case '${dir.name}' has neither expected.xcstrings nor expected-error.txt")
         }
     }
 
-    private fun runSuccessCase(name: String, inputDir: File, expectedFile: File) {
+    /**
+     * PLAN.md D4/D7 (2026-08-10 ruling): the corpus mechanism otherwise has
+     * no way to exercise `markupPolicy = STRIP`, since [AndroidToXcstringsConverter.convert]
+     * defaults to `ERROR`. An optional `markup-policy.txt` containing exactly
+     * one of the enum names (`STRIP`, `VERBATIM`) opts a case into that
+     * policy; a case without the file keeps testing the default, so every
+     * pre-existing case's coverage of `ERROR` is untouched by this addition.
+     */
+    private fun readMarkupPolicy(dir: File): MarkupPolicy {
+        val file = File(dir, "markup-policy.txt")
+        if (!file.isFile) return MarkupPolicy.ERROR
+        val raw = file.readText().trim()
+        return MarkupPolicy.entries.firstOrNull { it.name == raw }
+            ?: error("corpus case '${dir.name}': markup-policy.txt contains '$raw', which is not a MarkupPolicy value")
+    }
+
+    private fun runSuccessCase(name: String, inputDir: File, expectedFile: File, markupPolicy: MarkupPolicy) {
         val result = try {
-            AndroidToXcstringsConverter.convert(inputDir)
+            AndroidToXcstringsConverter.convert(inputDir, markupPolicy = markupPolicy)
         } catch (e: Exception) {
             fail<Unit>("corpus case '$name' expected success but conversion threw: ${e.message}", e)
             return
@@ -102,13 +120,13 @@ class CorpusTest {
         }
     }
 
-    private fun runErrorCase(name: String, inputDir: File, expectedFile: File) {
+    private fun runErrorCase(name: String, inputDir: File, expectedFile: File, markupPolicy: MarkupPolicy) {
         val requiredSubstrings = expectedFile.readLines().map { it.trim() }.filter { it.isNotEmpty() }
         check(requiredSubstrings.isNotEmpty()) { "corpus case '$name': expected-error.txt has no content" }
         checkSubstringsCanFail(name, expectedFile.parentFile.path, requiredSubstrings)
 
         val message = try {
-            AndroidToXcstringsConverter.convert(inputDir)
+            AndroidToXcstringsConverter.convert(inputDir, markupPolicy = markupPolicy)
             null
         } catch (e: Exception) {
             e.message

@@ -57,11 +57,18 @@ object AndroidToXcstringsConverter {
      * mapped tag can be pinned explicitly, keyed by the qualifier as written
      * (everything after `values-`, or `""` for bare `values`). The Gradle DSL
      * surface for this belongs to milestone 4; here it is a plain parameter.
+     *
+     * [markupPolicy] is PLAN.md D4's escape hatch for genuine inline styling
+     * markup (`<b>`, `<i>`, ...). `ERROR` (default) hard-errors on any real
+     * span; `STRIP` (implemented 2026-08-10) strips the tag and keeps the
+     * text, applying the span-boundary rules in `docs/CONVERSIONS.md`
+     * M2/Q2/W2; `VERBATIM` is not yet implemented.
      */
     fun convert(
         inputDir: File,
         sourceLanguage: String = "en",
         localeOverrides: Map<String, String> = emptyMap(),
+        markupPolicy: MarkupPolicy = MarkupPolicy.ERROR,
     ): ConversionResult {
         val (qualifyingDirs, discoveryDiagnostics) = discoverLocaleDirectories(inputDir)
         val localeDirs = qualifyingDirs.map { dir -> dir to File(dir, "strings.xml") }
@@ -77,7 +84,7 @@ object AndroidToXcstringsConverter {
         checkLocaleCollisions(mapped)
 
         val localeFiles: List<Pair<LocaleTag, ParsedFile>> = mapped.map { (tag, _, xml) ->
-            tag to AndroidStringsParser.parse(xml)
+            tag to AndroidStringsParser.parse(xml, markupPolicy)
         }
 
         val sourceTag = LocaleTag(sourceLanguage)

@@ -5,17 +5,26 @@ package net.sarazan.articulate.core.parse
  * the reference probe, and the backslash-escape/quote/whitespace-collapse pass
  * that AAPT2 calls `StringBuilder`.
  *
- * Callers only reach this once S1 (subtree flattening, [ContentFlattener]) has
- * established the string contains no real style span — a span makes the value
- * a `StyledString` and is a hard error under the default markup policy before
- * this pipeline ever runs, so trimming and the reference probe never need to
- * special-case "span present" here (see [ContentFlattener] for that gate).
+ * Callers reach this once S1 (subtree flattening, [ContentFlattener]) has
+ * run. Under `markupPolicy = ERROR` (default) a real span is a hard error
+ * before this pipeline ever runs, so [hasRealSpan]/[spanBoundaries] are
+ * always `false`/empty on that path. Under `markupPolicy = STRIP` a real
+ * span's tag is already gone from [ContentFlattener]'s output text, but two
+ * things still change here per `docs/CONVERSIONS.md`: **W2** -- edge
+ * trimming (S2) is skipped entirely for the whole string when [hasRealSpan]
+ * is `true`, not just around the span -- and **M2/Q2** -- AAPT2's
+ * `ResetTextState()` clears both the whitespace-collapse flag and the
+ * quoting flag at every offset in [spanBoundaries], so a space or open quote
+ * immediately adjacent to a stripped tag is never merged across that
+ * boundary with whitespace/quoting on the other side.
  */
 internal object AndroidTextPipeline {
 
     /**
      * Runs S2-S4 over [raw] (already S0/S1-flattened: entities resolved,
-     * `xliff:g`/foreign-namespace tags unwrapped, no real span).
+     * `xliff:g`/foreign-namespace tags unwrapped). [hasRealSpan] and
+     * [spanBoundaries] come straight from [FlattenedContent] -- see the
+     * class KDoc for what they change under `markupPolicy = STRIP`.
      *
      * Throws [ConversionException] for: an unescaped leading `@`/`?` (K4 — the
      * raw text would silently become an Android reference we cannot resolve),
@@ -23,8 +32,18 @@ internal object AndroidTextPipeline {
      * reproduced here), a bare apostrophe outside quoting (A1), or an odd
      * number of unescaped `"` (Q1 — Articulate's own stricter rule).
      */
-    fun process(raw: String, position: XmlPosition, key: String?): String {
-        val trimmed = raw.trim(::isAsciiWhitespace)
+    fun process(
+        raw: String,
+        position: XmlPosition,
+        key: String?,
+        hasRealSpan: Boolean = false,
+        spanBoundaries: List<Int> = emptyList(),
+    ): String {
+        // W2: edge trim (S2) applies only when no span was seen anywhere in
+        // the string. Trimming here would also invalidate the offsets in
+        // [spanBoundaries] (computed against the untrimmed rawText), which is
+        // exactly why W2 and this ordering constraint travel together.
+        val trimmed = if (hasRealSpan) raw else raw.trim(::isAsciiWhitespace)
         if (trimmed.isNotEmpty() && (trimmed[0] == '@' || trimmed[0] == '?')) {
             throw ConversionException(
                 position,
@@ -35,14 +54,24 @@ internal object AndroidTextPipeline {
                     "referenced value directly.",
             )
         }
-        return build(trimmed, position, key)
+        return build(trimmed, spanBoundaries, position, key)
     }
 
-    private fun build(raw: String, position: XmlPosition, key: String?): String {
+    private fun build(raw: String, spanBoundaries: List<Int>, position: XmlPosition, key: String?): String {
         val out = StringBuilder()
         var i = 0
         var quoted = false
         var lastWasCollapsedSpace = false
+        var boundaryIndex = 0
+        // Q1's odd-quote-count check must count literal '"' characters, not
+        // read the final value of [quoted] -- a span boundary forcibly resets
+        // [quoted] to false without a quote character being consumed, so an
+        // even number of real quotes around a span ("x <b>y</b> z") would
+        // otherwise look odd to a check that only inspects the final toggle
+        // state. [quoted] itself still drives whitespace-collapse/apostrophe
+        // behavior and is still reset at boundaries, per Q2 -- only the
+        // end-of-string oddness check needs the independent raw count.
+        var quoteCount = 0
 
         fun emit(c: Char) {
             out.append(c)
@@ -50,6 +79,17 @@ internal object AndroidTextPipeline {
         }
 
         while (i < raw.length) {
+            // M2/Q2: a span boundary resets both the whitespace-collapse flag
+            // and the quoting flag, exactly as AAPT2's ResetTextState() does
+            // at every span start and end. A `while`, not an `if`, because an
+            // empty span (`<b></b>`) or two adjacent spans contribute equal
+            // or consecutive offsets that must all fire before index [i]
+            // advances.
+            while (boundaryIndex < spanBoundaries.size && spanBoundaries[boundaryIndex] == i) {
+                lastWasCollapsedSpace = false
+                quoted = false
+                boundaryIndex++
+            }
             val c = raw[i]
             when {
                 c == '\\' -> {
@@ -94,6 +134,7 @@ internal object AndroidTextPipeline {
                 }
                 c == '"' -> {
                     quoted = !quoted
+                    quoteCount++
                     i++
                 }
                 c == '\'' && !quoted -> throw ConversionException(
@@ -116,7 +157,7 @@ internal object AndroidTextPipeline {
             }
         }
 
-        if (quoted) {
+        if (quoteCount % 2 != 0) {
             throw ConversionException(
                 position,
                 key,

@@ -1136,6 +1136,16 @@ row of the mapping table end to end) · `error-locale-non-locale-qualifier` (`va
 `values-de-night`, proving D5b's data-loss collision is caught) · `error-locale-collision-legacy-modern`
 (`values-iw` + `values-he`) · `error-locale-collision-script` (`values-zh-rCN` + `values-b+zh+Hans`).
 
+**`markupPolicy = STRIP`, PLAN.md D4/D7, 2026-08-10:** the corpus mechanism gained an optional
+`markup-policy.txt` per case (containing an exact `MarkupPolicy` enum name) so a case can opt into
+a non-default policy; a case without the file keeps exercising the default `ERROR`.
+`span-double-space-strip` (M2), `quote-reset-at-span-strip` (Q2), and
+`whitespace-edges-with-span-strip` (W2) each reuse the exact input already recorded for the
+ERROR-pinned case of the same name minus the `-strip` suffix, so the two cases are a direct
+before/after pair over one input under the two policies. The pre-existing `span-double-space`,
+`quote-reset-at-span`, and `whitespace-edges-with-span` cases are untouched and keep pinning
+`ERROR`'s hard-error behavior.
+
 ### Diagnostics channel (`PLAN.md` §2.7)
 
 Two rules in this document specify a **warning** rather than an error — M5 (foreign-namespace tags:

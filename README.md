@@ -162,12 +162,14 @@ already does it.
 Honest accounting, since this is a v0:
 
 - **Well covered.** Escaping, placeholders, plurals, locale mapping, byte-canonical serialization,
-  and the drift gate. 248 tests, a golden corpus differentially tested against `aapt2` and
-  `xcstringstool`, and a discipline that every regression test is proven red before it is accepted
-  green.
-- **Known gaps.** `markupPolicy` accepts `STRIP`/`VERBATIM` in the DSL but only `ERROR` is
-  implemented — setting either fails the build loudly rather than silently misbehaving. The Swift
-  key-parity lint (M6) is not built. SwiftPM standalone builds have a real limitation, documented in
+  markup stripping, and the drift gate. 259 tests, a golden corpus differentially tested against
+  `aapt2` and `xcstringstool`, and a discipline that every regression test is proven red before it is
+  accepted green.
+- **Known gaps.** `markupPolicy` accepts `VERBATIM` in the DSL but it is not implemented -- setting
+  it fails the build loudly rather than silently misbehaving. `ERROR` and `STRIP` are both fully
+  implemented, including the three span-boundary text rules `STRIP` depends on (double space at tag
+  edges, edge-trim suppression, quote reset at span boundaries). The Swift key-parity lint (M6) is not
+  built. SwiftPM standalone builds have a real limitation, documented in
   [`docs/swiftpm.md`](docs/swiftpm.md).
 - **Publication.** Namespace and credentials are in place; if the coordinates above do not resolve
   yet, the first Portal release is still in flight.
