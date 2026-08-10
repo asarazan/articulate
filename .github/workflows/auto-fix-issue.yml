@@ -140,9 +140,7 @@ jobs:
           TITLE="Fix Issue #$ISSUE_NUMBER: ${{ github.event.issue.title }}"
           NOTE=""
           if [[ -n "$WORKFLOW_FILES" ]]; then
-            NOTE="
-
-⚠️ Not included: changes to $WORKFLOW_FILES — GitHub blocks this automation from writing to .github/workflows/. Apply that part manually if needed."
+            NOTE=$'\n\n⚠️ Not included: changes to '"$WORKFLOW_FILES"$' — GitHub blocks this automation from writing to .github/workflows/. Apply that part manually if needed.'
           fi
           BODY="This PR attempts to fix Issue #$ISSUE_NUMBER.
 
