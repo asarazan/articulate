@@ -17,15 +17,17 @@ Gradle writes to `~/.gradle`, so it needs the sandbox disabled. Android and Grad
 
 ## If you are an agent working in this repo, this applies to you
 
-**Run no `git` command at all.** Not `add`/`commit`/`push`, and not `checkout`/`restore`/`reset`/`stash`/`clean`/`diff`/`status`/`log` either — read-only ones included, deliberately.
+**Work in your own tree, never the human's.** A worktree or a container. That is the primary defense; everything below is a backstop for when it fails.
 
-The tree you are working in is usually **uncommitted**, so a reflexive `git checkout -- file` to undo a mutation test can destroy work that exists nowhere else. Two agents have now breached this; in both cases it was harmless, which is exactly why the rule is absolute rather than judgment-based — the harmful and harmless cases look identical while you are typing them.
+**Read git freely — you are expected to.** `log`, `blame`, `show`, `diff`, `status` destroy nothing, and this repo's commit messages are load-bearing evidence (see "Merges preserve commit messages" below). A DECIDED claim in `PLAN.md` records what was *believed*; the commit that implemented it records what was *tested*. Consult the history before building on either.
 
-- To revert a mutation test: `cp` the file to a backup first, `cp` it back.
-- To inspect state: Read and Glob.
-- To know what changed: say so in your report and let the human look.
+**Never run these, in any tree:**
 
-A human reviews and commits. An automated pass must never certify itself into history, and must never be the reason work is lost.
+- **`checkout` / `restore` / `reset` / `clean` / `stash`.** Every recorded near-miss in this repo used one of these — three agents have now breached the old rule, all harmless by luck, which is precisely why the harmful and harmless cases cannot be told apart while you are typing them. They destroy uncommitted work *silently*: nothing tells you what was lost. To revert a mutation test, `cp` the file to a backup first and `cp` it back.
+- **`git add -A` / `add .`.** Stage explicit paths only — see "read what you staged" below.
+- **Any force-push, and any push to `main`.**
+
+**You may commit and push your own `feature/<slug>` branch and open a PR.** A human reviews and merges. Opening a PR is not certifying yourself into history — merging is, and `main`'s protection plus the required `CI` gate is what prevents that. An automated pass must never be the reason work is lost.
 
 **Whoever does commit: read what you staged, every time.** `git add -A` after a build sweeps up whatever the build dropped. A 373MB JVM heap dump reached a commit that way and was stopped only by GitHub's file-size hook — not by anything in this repo. List the staged paths and size-check anything binary *before* committing, not after a rejected push. This applies to the orchestrator too; it is easy to enforce on agents and forget for yourself.
 
@@ -33,7 +35,9 @@ A human reviews and commits. An automated pass must never certify itself into hi
 
 Each of these exists because it caught something real. They are not style preferences.
 
-**Prefer an oracle to an argument.** Real `aapt2` (`/private/tmp/claude-501/aapt2bin/aapt2`) and `xcstringstool` (`$(xcode-select -p)/usr/bin/xcstringstool`) are the reference implementations. When behavior is unclear, *compile the input and observe* rather than reasoning from documentation. This is the single biggest quality lever in the project — it turns "did I implement this right?" from judgment into experiment.
+**Prefer an oracle to an argument.** Real `aapt2` (`$ANDROID_HOME/build-tools/36.0.0/aapt2`) and `xcstringstool` (`$(xcode-select -p)/usr/bin/xcstringstool`) are the reference implementations. When behavior is unclear, *compile the input and observe* rather than reasoning from documentation. This is the single biggest quality lever in the project — it turns "did I implement this right?" from judgment into experiment.
+
+**Check the oracle exists before trusting a run, and never point it at a temp directory.** This line pointed `aapt2` at `/private/tmp/claude-501/aapt2bin/aapt2` until 2026-08-09, when it was found **absent** — a sandbox temp path macOS wipes, so the instruction was guaranteed to rot. An oracle that silently is not there is worse than none: it routes you straight back to reasoning from documentation, the exact failure this rule exists to prevent. If the binary is missing, say so and stop; do not substitute judgment. Two further constraints on where it can be consulted: `aapt2` ships with the SDK build-tools and works on Linux, but `xcstringstool` lives inside `Xcode.app` and is **unreachable from any Linux container** — a task needing it is macOS-only by construction. Note also that the evidence in `docs/CONVERSIONS.md` was gathered against **aapt2 2.19** and the binary above is **2.20**, so a fresh disagreement may be a genuine vendor change rather than a defect here.
 
 **Observation beats documentation — and that includes *our own* documentation.** Vendor docs have been contradicted by a real tool run **six times** here: Android's whitespace-collapsing rule, `addGeneratedSourceDirectory`'s output ownership, that ownership being AGP-version-dependent, `xcstringstool`'s `state: "new"` behavior, `<item type="string">` being a real string resource we silently dropped, and SwiftPM shipping an `.xcstrings` uncompiled so lookups return the key. Treat "the docs say X" as a hypothesis. **Twice now a settled decision in `PLAN.md` was corrected by the first person to actually run it** — writing D8's deliverable disproved D8's own table. A decision marked DECIDED records what was believed, not what was tested; check the evidence tag before building on it.
 
@@ -72,7 +76,8 @@ git worktree add ../articulate-wt/<slug> -b feature/<slug>
 ```
 
 - **Merges preserve commit messages** — merge commit or rebase-merge, **never squash**. Commit messages in this repo are load-bearing records (they carry the evidence trail specs cite); squashing destroys them.
-- **Agents still run no git, ever** — the orchestrator creates branches/worktrees and commits. The absolute prohibition in the section above is unchanged by this workflow.
+- **Give every agent its own tree** — a worktree locally, or a container. Agents commit their own `feature/<slug>` branch and open the PR themselves; the orchestrator no longer commits on their behalf. The denylist above still applies everywhere.
+- **Cloud agents in disposable containers need nothing beyond that denylist** — nothing on that disk exists anywhere else, and the worst case is discarding the container. State the branch-and-PR expectation in the launching prompt rather than expecting an agent to work out where it is running; an agent that was told nothing should behave as if it is in your tree.
 - Delete the worktree and branch after merge; a stale worktree is uncommitted-work risk.
 - **While any agent owns a working tree, the human's IDE is a consumer of that tree**: `includeBuild` means a Studio sync compiles whatever half-written state exists at that moment. Announce hot trees before inviting a sync; prefer giving agents their own worktree for anything long-running.
 
