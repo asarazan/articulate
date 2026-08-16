@@ -37,22 +37,27 @@ class ArticulatePlugin : Plugin<Project> {
         extension.markupPolicy.convention(MarkupPolicy.ERROR)
         extension.warningsAsErrors.convention(false)
 
-        // Task 4 correctness fix (PLAN.md §13's M4/M5 audit): STRIP/VERBATIM
-        // are declared DSL surface (D4) but core always behaves as ERROR
-        // regardless of what's set -- silently. A user who asks for STRIP and
-        // gets ERROR-shaped behavior with no diagnostic is exactly the "95%
-        // right is worse than none" hazard the brief forbids. afterEvaluate,
-        // not read eagerly here, so this observes whatever the consumer's own
-        // `articulate { markupPolicy = ... }` block (which runs after this
-        // apply()) actually set -- reading extension.markupPolicy.get() here
-        // instead would only ever see the ERROR convention just above.
+        // Task 4 correctness fix (PLAN.md §13's M4/M5 audit), narrowed
+        // 2026-08-10 when STRIP shipped (this issue's ruling, PLAN.md D4/D7):
+        // VERBATIM is still declared DSL surface (D4) but core does not
+        // implement it -- a user who asks for VERBATIM and silently gets
+        // ERROR- or STRIP-shaped behavior instead is exactly the "95% right
+        // is worse than none" hazard the brief forbids. STRIP no longer
+        // fails fast here: core now implements it end to end, together with
+        // the three span-boundary text rules it depends on (M2/Q2/W2) --
+        // see [MarkupPolicy]. afterEvaluate, not read eagerly here, so this
+        // observes whatever the consumer's own `articulate { markupPolicy = ... }`
+        // block (which runs after this apply()) actually set -- reading
+        // extension.markupPolicy.get() here instead would only ever see the
+        // ERROR convention just above.
         project.afterEvaluate {
             val policy = extension.markupPolicy.get()
-            if (policy != MarkupPolicy.ERROR) {
+            if (policy == MarkupPolicy.VERBATIM) {
                 throw GradleException(
                     "net.sarazan.articulate: markupPolicy = $policy is not yet implemented -- only " +
-                        "MarkupPolicy.ERROR is supported in v0. See PLAN.md §2.2's D4 ruling. Remove the " +
-                        "markupPolicy override or set it to MarkupPolicy.ERROR.",
+                        "MarkupPolicy.ERROR and MarkupPolicy.STRIP are supported. See PLAN.md §2.2's D4 " +
+                        "ruling. Remove the markupPolicy override, or set it to MarkupPolicy.ERROR or " +
+                        "MarkupPolicy.STRIP.",
                 )
             }
         }
@@ -100,6 +105,7 @@ class ArticulatePlugin : Plugin<Project> {
             task.stringsDir.set(extension.stringsDir)
             task.sourceLanguage.set(extension.sourceLanguage)
             task.localeOverrides.set(extension.localeOverrides)
+            task.markupPolicy.set(extension.markupPolicy)
             task.warningsAsErrors.set(extension.warningsAsErrors)
         }
 
@@ -130,6 +136,7 @@ class ArticulatePlugin : Plugin<Project> {
             task.stringsDir.set(extension.stringsDir)
             task.sourceLanguage.set(extension.sourceLanguage)
             task.localeOverrides.set(extension.localeOverrides)
+            task.markupPolicy.set(extension.markupPolicy)
             task.warningsAsErrors.set(extension.warningsAsErrors)
             task.xcstringsFile.set(extension.ios.catalog)
         }
@@ -153,6 +160,7 @@ class ArticulatePlugin : Plugin<Project> {
             task.stringsDir.set(extension.stringsDir)
             task.sourceLanguage.set(extension.sourceLanguage)
             task.localeOverrides.set(extension.localeOverrides)
+            task.markupPolicy.set(extension.markupPolicy)
             task.warningsAsErrors.set(extension.warningsAsErrors)
             task.xcstringsFile.set(extension.ios.catalog)
         }

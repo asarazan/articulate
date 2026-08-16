@@ -12,12 +12,27 @@ internal data class XliffPlaceholder(val id: String?, val example: String?)
 /** M5: one dropped foreign-namespace tag, in document order. */
 internal data class ForeignNamespaceTag(val localName: String, val namespaceUri: String, val position: XmlPosition)
 
-/** The result of flattening one `<string>`/`<item>` element's content (S1). */
+/**
+ * The result of flattening one `<string>`/`<item>` element's content (S1).
+ *
+ * [spanBoundaries] is every offset into [rawText] where a real (no-namespace)
+ * span started or ended, in document order -- one entry per boundary, so an
+ * empty span (`<b></b>`) contributes two equal offsets and a nested span
+ * (`<b>b <i>c</i> d</b>`) contributes four, two per tag. This is what
+ * `docs/CONVERSIONS.md`'s M2/Q2 rules need: AAPT2's `ResetTextState()` runs
+ * at *every* span start and end, not just the first, so
+ * [net.sarazan.articulate.core.parse.AndroidTextPipeline] (under
+ * `markupPolicy = STRIP`) resets its whitespace-collapse and quoting state
+ * at each of these offsets while walking [rawText]. `<xliff:g>` and
+ * foreign-namespace tags never contribute a boundary here -- M4/M5 both
+ * apply no state reset, exactly as the walker below implements it.
+ */
 internal data class FlattenedContent(
     val rawText: String,
     val hasRealSpan: Boolean,
     val spanTagName: String?,
     val spanPosition: XmlPosition?,
+    val spanBoundaries: List<Int>,
     val xliffPlaceholders: List<XliffPlaceholder>,
     val foreignNamespaceTags: List<ForeignNamespaceTag>,
 )
@@ -25,16 +40,20 @@ internal data class FlattenedContent(
 /**
  * Implements S1 ("subtree flatten") from `docs/CONVERSIONS.md` §1 and §6.
  *
- * A no-namespace child element is a real style span (M1) — under this
- * milestone's default `markupPolicy = ERROR`, its mere presence is a hard
- * error, so this flattener only needs to *detect* one, not build correct
- * span-boundary text for it (the `STRIP`/`VERBATIM` policies that would need
- * that are unimplemented placeholders — see PLAN.md D4).
+ * A no-namespace child element is a real style span (M1). Under
+ * `markupPolicy = ERROR` its mere presence is a hard error, so only
+ * *detecting* one matters there; under `markupPolicy = STRIP` (PLAN.md D4,
+ * implemented 2026-08-10) the tag itself is already gone by construction --
+ * this flattener never appends tag markers to [FlattenedContent.rawText] --
+ * and every span's start/end offset into that text is recorded in
+ * [FlattenedContent.spanBoundaries] so [AndroidTextPipeline] can reproduce
+ * AAPT2's per-boundary state resets (M2 double-space, Q2 quote reset).
  *
  * `<xliff:g>` (M4) and foreign-namespace tags (M5) are transparent: their tag
  * is dropped, their text content is folded into the same continuous stream as
  * their surroundings with no state reset, and their children are recursed
- * into (so a real span nested inside either is still detected).
+ * into (so a real span nested inside either is still detected and still
+ * contributes its own boundaries).
  */
 internal class ContentFlattener(private val filePath: String) {
 
@@ -48,6 +67,7 @@ internal class ContentFlattener(private val filePath: String) {
         val text = StringBuilder()
         val xliffPlaceholders = mutableListOf<XliffPlaceholder>()
         val foreignNamespaceTags = mutableListOf<ForeignNamespaceTag>()
+        val spanBoundaries = mutableListOf<Int>()
         var hasRealSpan = false
         var spanTagName: String? = null
         var spanPosition: XmlPosition? = null
@@ -96,10 +116,16 @@ internal class ContentFlattener(private val filePath: String) {
 
                             uri.isEmpty() -> {
                                 recordSpan(local, position)
-                                // Still recurse so a nested real span or malformed nested
-                                // xliff:g is caught rather than silently swallowed, and so
-                                // the span's own text doesn't corrupt sibling flattening.
+                                // M2/Q2: AAPT2's ResetTextState() runs at both the start
+                                // and the end of every span, so both offsets are
+                                // recorded -- one before recursing into the tag's own
+                                // content, one after, bracketing whatever text that
+                                // recursion appends. Still recurse so a nested real span
+                                // or malformed nested xliff:g is caught rather than
+                                // silently swallowed.
+                                spanBoundaries += text.length
                                 walk(insideXliffG)
+                                spanBoundaries += text.length
                             }
 
                             else -> {
@@ -132,7 +158,7 @@ internal class ContentFlattener(private val filePath: String) {
             "internal error: expected </$endLocalName>, found </${reader.localName}>"
         }
 
-        return FlattenedContent(text.toString(), hasRealSpan, spanTagName, spanPosition, xliffPlaceholders, foreignNamespaceTags)
+        return FlattenedContent(text.toString(), hasRealSpan, spanTagName, spanPosition, spanBoundaries, xliffPlaceholders, foreignNamespaceTags)
     }
 }
 

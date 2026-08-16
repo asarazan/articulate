@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="unicode_escape_span">a\u0041<b>n</b>x <i> y </i> z</string>
+</resources>

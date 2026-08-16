@@ -1,0 +1,17 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "unicode_escape_span" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "aAnx  y  z"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

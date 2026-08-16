@@ -37,16 +37,15 @@ abstract class ArticulateExtension @Inject constructor(objects: ObjectFactory) {
 
     /**
      * D4's escape hatch. Declared here so the DSL shape a consumer builds
-     * against doesn't change when `STRIP`/`VERBATIM` are implemented, but it
-     * is not yet wired to [net.sarazan.articulate.core.convert.AndroidToXcstringsConverter.convert]
-     * -- that function has no such parameter today (core's own KDoc: "there
-     * is deliberately no parameter wiring this in yet, since adding one
-     * before a second policy exists would be speculative API surface with no
-     * caller"). Setting anything other than the default [MarkupPolicy.ERROR]
-     * fails the build fast at configuration time (see [ArticulatePlugin.apply])
-     * rather than silently behaving as `ERROR` anyway -- a user who asks for
-     * `STRIP` and silently gets `ERROR` is exactly the "95% right is worse
-     * than none" hazard the brief forbids.
+     * against doesn't change as more policies land. `STRIP` (implemented
+     * 2026-08-10, together with the three span-boundary text rules it
+     * depends on -- see [MarkupPolicy]) is wired all the way to
+     * [net.sarazan.articulate.core.convert.AndroidToXcstringsConverter.convert].
+     * `VERBATIM` remains unimplemented: setting it still fails the build
+     * fast at configuration time (see [ArticulatePlugin.apply]) rather than
+     * silently behaving as `ERROR`/`STRIP` instead -- a user who asks for
+     * `VERBATIM` and silently gets something else is exactly the "95% right
+     * is worse than none" hazard the brief forbids.
      */
     abstract val markupPolicy: Property<MarkupPolicy>
 

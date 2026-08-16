@@ -1,5 +1,6 @@
 package net.sarazan.articulate.core.parse
 
+import net.sarazan.articulate.core.convert.MarkupPolicy
 import net.sarazan.articulate.core.diagnostics.Diagnostic
 import net.sarazan.articulate.core.diagnostics.Severity
 import net.sarazan.articulate.core.model.PluralCategory
@@ -31,16 +32,17 @@ private val QUANTITY_TO_CATEGORY: Map<String, PluralCategory> = mapOf(
  */
 internal object AndroidStringsParser {
 
-    fun parse(file: File): ParsedFile = file.inputStream().use { parse(it, file.path) }
+    fun parse(file: File, markupPolicy: MarkupPolicy = MarkupPolicy.ERROR): ParsedFile =
+        file.inputStream().use { parse(it, file.path, markupPolicy) }
 
-    fun parse(input: InputStream, filePath: String): ParsedFile {
+    fun parse(input: InputStream, filePath: String, markupPolicy: MarkupPolicy = MarkupPolicy.ERROR): ParsedFile {
         val factory = XMLInputFactory.newFactory().apply {
             setProperty(XMLInputFactory.SUPPORT_DTD, false)
             setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false)
         }
         val reader = factory.createXMLStreamReader(input)
         try {
-            return parseDocument(reader, filePath)
+            return parseDocument(reader, filePath, markupPolicy)
         } catch (e: XMLStreamException) {
             // S0 failures (an invalid character reference such as `&#11;`, a stray
             // `&`, an unclosed tag) surface as a raw StAX exception whose message
@@ -65,7 +67,7 @@ internal object AndroidStringsParser {
     private fun XMLStreamException.rawMessage(): String =
         message.orEmpty().substringAfterLast("Message: ").trim().ifEmpty { toString() }
 
-    private fun parseDocument(reader: XMLStreamReader, filePath: String): ParsedFile {
+    private fun parseDocument(reader: XMLStreamReader, filePath: String, markupPolicy: MarkupPolicy): ParsedFile {
         val flattener = ContentFlattener(filePath)
         val resources = mutableListOf<ParsedResource>()
         val diagnostics = mutableListOf<Diagnostic>()
@@ -97,13 +99,17 @@ internal object AndroidStringsParser {
                     pendingComment = null
                     when (reader.localName) {
                         "string" -> {
-                            val resource = parseStringElement(reader, flattener, filePath, position, commentForThisElement, diagnostics)
+                            val resource = parseStringElement(
+                                reader, flattener, filePath, position, commentForThisElement, diagnostics, markupPolicy,
+                            )
                             checkDuplicate(seenNames, resource.name, position, filePath)
                             resources += resource
                         }
 
                         "plurals" -> {
-                            val resource = parsePluralsElement(reader, flattener, filePath, position, commentForThisElement, diagnostics)
+                            val resource = parsePluralsElement(
+                                reader, flattener, filePath, position, commentForThisElement, diagnostics, markupPolicy,
+                            )
                             checkDuplicate(seenNames, resource.name, position, filePath)
                             resources += resource
                         }
@@ -132,7 +138,7 @@ internal object AndroidStringsParser {
                                 // knew the key existed.
                                 "string" -> {
                                     val resource = parseStringElement(
-                                        reader, flattener, filePath, position, commentForThisElement, diagnostics,
+                                        reader, flattener, filePath, position, commentForThisElement, diagnostics, markupPolicy,
                                         elementName = "item",
                                     )
                                     checkDuplicate(seenNames, resource.name, position, filePath)
@@ -217,6 +223,7 @@ internal object AndroidStringsParser {
         position: XmlPosition,
         pendingComment: String?,
         diagnostics: MutableList<Diagnostic>,
+        markupPolicy: MarkupPolicy,
         elementName: String = "string",
     ): ParsedResource.StringResource {
         val name = requireName(reader, position)
@@ -231,10 +238,10 @@ internal object AndroidStringsParser {
         // both to the same `string` resource type, byte-indistinguishable in the
         // resource table.
         val flattened = flattener.flatten(reader, elementName, name)
-        if (flattened.hasRealSpan) throw styledMarkupError(flattened, filePath, name)
+        if (flattened.hasRealSpan) checkMarkupPolicy(flattened, filePath, name, markupPolicy)
         diagnostics += foreignNamespaceWarnings(flattened, name)
 
-        val value = AndroidTextPipeline.process(flattened.rawText, position, name)
+        val value = AndroidTextPipeline.process(flattened.rawText, position, name, flattened.hasRealSpan, flattened.spanBoundaries)
         val comment = mergeComments(pendingComment, buildXliffComment(flattened.xliffPlaceholders))
         return ParsedResource.StringResource(name, translatable, formatted, comment, position, value)
     }
@@ -246,6 +253,7 @@ internal object AndroidStringsParser {
         position: XmlPosition,
         pendingComment: String?,
         diagnostics: MutableList<Diagnostic>,
+        markupPolicy: MarkupPolicy,
     ): ParsedResource.PluralResource {
         val name = requireName(reader, position)
         checkKeyLegality(name, position)
@@ -283,9 +291,11 @@ internal object AndroidStringsParser {
                         )
                     }
                     val flattened = flattener.flatten(reader, "item", name)
-                    if (flattened.hasRealSpan) throw styledMarkupError(flattened, filePath, name)
+                    if (flattened.hasRealSpan) checkMarkupPolicy(flattened, filePath, name, markupPolicy)
                     diagnostics += foreignNamespaceWarnings(flattened, name)
-                    val value = AndroidTextPipeline.process(flattened.rawText, itemPosition, name)
+                    val value = AndroidTextPipeline.process(
+                        flattened.rawText, itemPosition, name, flattened.hasRealSpan, flattened.spanBoundaries,
+                    )
                     variants[category] = value
                     val xliffComment = buildXliffComment(flattened.xliffPlaceholders)
                     if (xliffComment != null) mergedComment = mergeComments(mergedComment, xliffComment)
@@ -317,6 +327,30 @@ internal object AndroidStringsParser {
         }
     }
 
+    /**
+     * Dispatches on [markupPolicy] for a resource [FlattenedContent] already
+     * knows has a real span. `ERROR` (default) throws immediately, as
+     * before. `STRIP` (PLAN.md D4, implemented 2026-08-10) does nothing here
+     * -- [ContentFlattener] has already dropped the tag from the text, and
+     * [FlattenedContent.spanBoundaries] carries what [AndroidTextPipeline]
+     * needs to reproduce the span-boundary rules (M2/Q2/W2). `VERBATIM`
+     * remains unimplemented and errors distinctly from `ERROR` so a caller
+     * can tell "markup rejected" apart from "policy not built yet".
+     */
+    private fun checkMarkupPolicy(flattened: FlattenedContent, filePath: String, key: String, markupPolicy: MarkupPolicy) {
+        when (markupPolicy) {
+            MarkupPolicy.ERROR -> throw styledMarkupError(flattened, filePath, key)
+            MarkupPolicy.STRIP -> Unit
+            MarkupPolicy.VERBATIM -> throw ConversionException(
+                flattened.spanPosition ?: XmlPosition(filePath, -1, -1),
+                key,
+                "markupPolicy = VERBATIM is not yet implemented -- only ERROR and STRIP are supported. " +
+                    "See PLAN.md D4. Remove the markup, set markupPolicy = MarkupPolicy.STRIP, or set it " +
+                    "back to MarkupPolicy.ERROR.",
+            )
+        }
+    }
+
     private fun styledMarkupError(flattened: FlattenedContent, filePath: String, key: String): ConversionException =
         ConversionException(
             flattened.spanPosition ?: XmlPosition(filePath, -1, -1),
@@ -324,7 +358,7 @@ internal object AndroidStringsParser {
             "inline styling markup <${flattened.spanTagName}> is not supported -- .xcstrings values " +
                 "are flat strings with no span concept, so styling information provably cannot " +
                 "survive the conversion. Remove the markup, or opt in to markupPolicy = STRIP " +
-                "(strip tags, keep text) once available.",
+                "(strip tags, keep text).",
         )
 
     private fun parseBooleanAttr(reader: XMLStreamReader, attrName: String, position: XmlPosition, key: String): Boolean? {

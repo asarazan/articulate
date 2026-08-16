@@ -6,9 +6,9 @@ plugins {
 }
 
 // Publishing coordinates. 0.1.0 deliberately, not 1.0.0: `markupPolicy` accepts
-// STRIP and VERBATIM in the DSL but only ERROR is implemented (D4), the M6
-// Swift key-parity lint is not built, and generated common-layer tokens are
-// scoped but not built (PLAN.md §14 amendment). 0.x is the honest signal.
+// VERBATIM in the DSL but it is not implemented (D4) -- ERROR and STRIP both
+// are -- the M6 Swift key-parity lint is not built, and generated common-layer
+// tokens are scoped but not built (PLAN.md §14 amendment). 0.x is the honest signal.
 // Set per-module rather than via allprojects{} -- the root script forbids
 // cross-project configuration precisely because it breaks project isolation.
 group = "net.sarazan.articulate"

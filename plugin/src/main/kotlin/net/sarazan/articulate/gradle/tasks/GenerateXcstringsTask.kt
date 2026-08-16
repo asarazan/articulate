@@ -1,6 +1,7 @@
 package net.sarazan.articulate.gradle.tasks
 
 import net.sarazan.articulate.core.convert.AndroidToXcstringsConverter
+import net.sarazan.articulate.core.convert.MarkupPolicy
 import net.sarazan.articulate.core.serialize.XcstringsWriter
 import net.sarazan.articulate.gradle.reportDiagnostics
 import org.gradle.api.DefaultTask
@@ -44,6 +45,9 @@ abstract class GenerateXcstringsTask : DefaultTask() {
     abstract val localeOverrides: MapProperty<String, String>
 
     @get:Input
+    abstract val markupPolicy: Property<MarkupPolicy>
+
+    @get:Input
     abstract val warningsAsErrors: Property<Boolean>
 
     /** DSL-configured via `articulate { ios { catalog = file(...) } } }`. */
@@ -52,7 +56,9 @@ abstract class GenerateXcstringsTask : DefaultTask() {
 
     @TaskAction
     fun generate() {
-        val result = AndroidToXcstringsConverter.convert(stringsDir.get().asFile, sourceLanguage.get(), localeOverrides.get())
+        val result = AndroidToXcstringsConverter.convert(
+            stringsDir.get().asFile, sourceLanguage.get(), localeOverrides.get(), markupPolicy.get(),
+        )
         reportDiagnostics(logger, result.diagnostics, warningsAsErrors.get(), "generateXcstrings")
 
         val target = xcstringsFile.get().asFile

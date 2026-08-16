@@ -209,7 +209,7 @@ Research (`docs/CONVERSIONS.md` §5–6) found the original one-line framing con
 enum class MarkupPolicy { ERROR, STRIP, VERBATIM }
 ```
 
-`VERBATIM` (ship the raw tags through as literal text) was flagged in research as the weakest of the three options on its own — it produces a visible, shipped defect rather than a build-time error — but the ruling is to make it available as an explicit, informed opt-in rather than omit it: someone migrating an existing pipeline, or post-processing the catalog downstream, may have a specific reason to want it, and the non-default gate means choosing it is a deliberate act, not an accident. The knob itself ships in v0 (so the DSL shape doesn't change later); `STRIP` and `VERBATIM`'s actual *implementations* are deferred — `STRIP` to v0.1 per the original plan, `VERBATIM` unscheduled since it's pure pass-through and lower priority than `STRIP`.
+`VERBATIM` (ship the raw tags through as literal text) was flagged in research as the weakest of the three options on its own — it produces a visible, shipped defect rather than a build-time error — but the ruling is to make it available as an explicit, informed opt-in rather than omit it: someone migrating an existing pipeline, or post-processing the catalog downstream, may have a specific reason to want it, and the non-default gate means choosing it is a deliberate act, not an accident. The knob itself ships in v0 (so the DSL shape doesn't change later). **Updated 2026-08-10:** `STRIP` is now implemented, together with the three span-boundary rules it exposes (double space at tag edges, edge-trim suppression, quote reset at span boundaries). `VERBATIM` remains unscheduled since it is pure pass-through and lower priority than `STRIP`; setting it fails loudly rather than silently behaving as another policy.
 
 Corpus cases: `cdata-not-verbatim`, `cdata-inert-markup`, `error-cdata-apostrophe`, `xliff-g-unwrap`, `xliff-g-whitespace`, `xliff-g-attrs-to-comment`, `error-nested-xliff-g`, `error-styled-nonpositional`, `span-double-space`, `foreign-namespace-warn` (all from `docs/CONVERSIONS.md` §12).
 
@@ -742,7 +742,7 @@ Relevant version facts, verified: AGP 9.3 requires Gradle 9.5.0 (which is our ow
     sourceLanguage = "en"                        // default "en"
     ios { catalog = file("../ios/App/Shared.xcstrings"); table = "Shared" }
     localeOverrides.put("zh-rCN", "zh-Hans")     // escape hatch, see D5
-    markupPolicy = MarkupPolicy.ERROR            // D4; STRIP/VERBATIM not yet implemented
+    markupPolicy = MarkupPolicy.ERROR            // D4; ERROR/STRIP implemented, VERBATIM not yet
     warningsAsErrors = false                     // see below
     kotlinKeys { enabled = true; packageName = "…" }   // optional commonMain keys object
   }
@@ -780,6 +780,8 @@ Research adds one supporting argument: AAPT2's `ParseArrayImpl` accepts a genera
 **Ruled as recommended.** v0 ships generation *and* the drift gate; the Swift key-parity lint is v0.1. The gate is not deferrable: byte-determinism without enforcement is half a feature, and a committed generated file with nothing checking it will drift silently — which is precisely the failure the whole determinism effort exists to prevent. Rejected: milestones 1–4 (ships the artifact without the mechanism that keeps it honest) and 1–6 (m6 needs re-speccing off `xcstringstool generate-symbols` first, so it would delay v0 for a feature that is better late than heuristic).
 
 **Also ruled (2026-07-30): the `STRIP` span-text gap is deferred, not pre-built.** The M3 audit found that span-boundary text is *detected* but never *built*, so the three rules governing it (double space at tag edges, edge-trim suppression, quote reset) have no implementation to test — meaning `STRIP` would ship in v0.1 against untested behavior. Ruling: implement those rules *when* `STRIP` is built, together, rather than building a pipeline in v0 that nothing consumes. This is safe because v0 implements only `ERROR`, where the gap is unreachable. The reference `aapt2` outputs for all three rules are already recorded in the audit report, so the work is spec'd when it starts.
+
+**CLOSED 2026-08-10: `STRIP` is built, together with all three rules.** `ContentFlattener` now records every real span's start/end offset (`spanBoundaries`), and `AndroidTextPipeline` resets its whitespace-collapse and quoting state at each one, reproducing AAPT2's `ResetTextState()` (M2 double space, Q2 quote reset) — and W2's edge-trim suppression is now conditioned on `hasRealSpan` rather than applying unconditionally. `AndroidToXcstringsConverter.convert` takes a `markupPolicy` parameter threaded through the parser; the Gradle plugin's configuration-time rejection now applies only to `VERBATIM`, not `STRIP`. New corpus cases (`span-double-space-strip`, `quote-reset-at-span-strip`, `whitespace-edges-with-span-strip`, each opting into `STRIP` via a `markup-policy.txt` file the corpus runner now reads) reproduce the exact byte values recorded in `docs/CONVERSIONS.md`'s oracle evidence for M2/Q2/W2. The pre-existing `span-double-space`, `quote-reset-at-span`, and `whitespace-edges-with-span` cases are unchanged and continue pinning the default `ERROR` policy's hard-error behavior on the same inputs.
 
 ---
 
@@ -872,7 +874,7 @@ Blocking first; later items can wait until their milestone starts.
 - ✅ **D2 — Test strategy** (§E3): **three tiers** (core unit/corpus → TestKit → sample smoke). *Decided 2026-07-30.*
 - ✅ **D3 — Integer specifier mapping** (§2.3): **`%d → %lld`**, unconditional, not configurable. *Decided 2026-07-30.*
 - ✅ **D12 — Toolchain** (§E6): **committed Gradle wrapper + toolchain-pinned JDK**; bootstrap is a one-time human step. *Decided 2026-07-30.*
-- ✅ **D4 — Inline markup & CDATA policy** (§2.2): CDATA supported (corrected — was never actually a policy question); `<xliff:g>` unwrapped transparently (not optional — real-world necessity); genuine styling markup hard-errors by default, with a three-way `markupPolicy = ERROR | STRIP | VERBATIM` DSL escape hatch shipped in v0 (`STRIP`/`VERBATIM` implementations deferred). Full ruling in §2.2. *Decided 2026-07-30.*
+- ✅ **D4 — Inline markup & CDATA policy** (§2.2): CDATA supported (corrected — was never actually a policy question); `<xliff:g>` unwrapped transparently (not optional — real-world necessity); genuine styling markup hard-errors by default, with a three-way `markupPolicy = ERROR | STRIP | VERBATIM` DSL escape hatch shipped in v0. *Decided 2026-07-30.* **`STRIP` implemented 2026-08-10** (see D7's close-out); `VERBATIM` remains deferred.
 - ✅ **D6 — `<string-array>` policy** (§8): **reject at parse time in v0**, error names the array and suggests `foo_0`/`foo_1` plain strings. *Decided 2026-07-30.*
 - ✅ **D3a — `%x`/`%o` mapping** (§2.3): **`%llx` / `%llX` / `%llo`**, extending D3's reasoning to hex/octal on verified evidence of the same 32-bit truncation. *Decided 2026-07-30.*
 - ✅ **`translatable="false"` handling** (§2.6): **emit with `"shouldTranslate": false`**, do not drop — `.xcstrings` has a native equivalent with matching semantics. *Decided 2026-07-30.*
@@ -884,7 +886,7 @@ Blocking first; later items can wait until their milestone starts.
 - ✅ **D9 — Gradle/AGP floor** (§E2): **AGP 8.5.2 / Gradle 8.7**, two-cell matrix {floor, AGP 9.1}. Revised down from the original AGP 8.1 proposal because KGP 2.4.10 cannot build a sample below 8.5.2 — an 8.1 floor would have advertised an untestable configuration. *Decided 2026-07-30.* REVISED 2026-08-03 to AGP 9.1.0/Gradle 9.3.1, see §E2.
 - ✅ **D10 — Plugin ID / DSL shape** (§E4): **two plugin IDs**, so only the `.android` plugin carries AGP on its classpath and non-Android consumers never pull it. Plus `warningsAsErrors`, defaulting to `false`. *Decided 2026-07-30.*
 
-- ✅ **D7 — v0 scope** (§8): **milestones 1–5** — generation *and* the drift gate; Swift lint is v0.1. Plus: the `STRIP` span-text gap is implemented when `STRIP` ships, not pre-built, since v0 implements only `ERROR` where the gap is unreachable. *Decided 2026-07-30.*
+- ✅ **D7 — v0 scope** (§8): **milestones 1–5** — generation *and* the drift gate; Swift lint is v0.1. The `STRIP` span-text gap was implemented alongside `STRIP` itself, per this ruling. *Decided 2026-07-30; STRIP + span-boundary rules closed out 2026-08-10.*
 - ✅ **`generateStrings` task shape** (§4.4): **two typed tasks plus an aggregate** — different output lifecycles deserve different up-to-date semantics; the aggregate keeps the `generateStrings` name users are told to run. *Decided 2026-07-30.*
 - ✅ **Committed-vs-generated asymmetry** (§4.4): **upheld on review** — it follows from Xcode being outside Gradle's build graph while AGP is inside it. Reasoning and merge-conflict guidance recorded so it isn't re-litigated. *Reviewed 2026-07-30.*
 
