@@ -40,7 +40,15 @@ jobs:
   audit:
     # Bot-authored PRs only on the automatic trigger; workflow_dispatch is
     # unconditional (a human explicitly asked).
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.user.type == 'Bot'
+    # Dependabot is excluded: GitHub withholds repository secrets from
+    # dependabot-triggered pull_request runs, so the audit fails on an empty
+    # token before it starts (observed on PRs #27/#28, 2026-08-15). Version
+    # bumps carry no self-reported claims to audit anyway; CI is their gate.
+    # Re-audit one manually via workflow_dispatch if ever warranted.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.user.type == 'Bot' &&
+       github.event.pull_request.user.login != 'dependabot[bot]')
     runs-on: ubuntu-latest
     # The audit re-runs the full suite plus targeted mutation re-proofs and
     # oracle compiles; CI's plugin tier alone is up to ~45m.
