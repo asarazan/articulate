@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="escape_adjacent_span">a\<b>n</b>x <i> y </i> z</string>
+</resources>

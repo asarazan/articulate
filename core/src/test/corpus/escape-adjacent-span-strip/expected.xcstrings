@@ -1,0 +1,17 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "escape_adjacent_span" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "a\nx  y  z"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}
