@@ -1,6 +1,6 @@
-# Factory connection test
+# FACTORY CONNECTION TEST
 
-This pull request verifies your Factory's GitHub connection.
+THIS PULL REQUEST VERIFIES YOUR FACTORY'S GITHUB CONNECTION.
 
-It was seeded automatically. Once the Factory picks it up, it is safe to
-close this pull request and delete the branch.
+IT WAS SEEDED AUTOMATICALLY. ONCE THE FACTORY PICKS IT UP, IT IS SAFE TO
+CLOSE THIS PULL REQUEST AND DELETE THE BRANCH.
